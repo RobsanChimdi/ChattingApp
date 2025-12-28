@@ -1,0 +1,94 @@
+@'
+# ============================
+# PYTHON
+# ============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ============================
+# VIRTUAL ENVIRONMENTS
+# ============================
+venv/
+ENV/
+env/
+.venv/
+.virtualenv/
+
+# ============================
+# DJANGO
+# ============================
+*.log
+*.pot
+*.sqlite3
+*.db
+db.sqlite3
+instance/
+.webassets-cache
+.static/
+.media/
+
+# ============================
+# ENVIRONMENT VARIABLES
+# ============================
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+secrets.ini
+
+# ============================
+# IDE
+# ============================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ============================
+# OS
+# ============================
+Thumbs.db
+desktop.ini
+
+# ============================
+# TESTING
+# ============================
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# ============================
+# LOGS
+# ============================
+logs/
+temp/
+tmp/
+
+# ============================
+# STATIC FILES
+# ============================
+staticfiles/
+media/
+'@ | Out-File -FilePath ".gitignore" -Encoding ASCII
