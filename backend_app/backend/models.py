@@ -3,6 +3,8 @@ from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 import os
 from django.utils import timezone
+from django.db.models import Count, Q, Avg
+from django.db.models.functions import Trunc
 
 class User(AbstractUser):
     profile_image = models.ImageField(upload_to="profiles/", blank=True, null=True)
@@ -100,11 +102,10 @@ class Chat(models.Model):
     
     def last_message(self):
         """Get the last message in chat"""
-        return self.messages.last()
+        return self.messages.filter(is_deleted=False).last()
     
     def unread_count(self, user):
         """Get unread message count for a specific user"""
-        from django.db.models import Count, Q
         return self.messages.filter(
             ~Q(sender=user) &  # Not sent by the user
             Q(statuses__user=user, statuses__status__in=['sent', 'delivered'])
@@ -228,7 +229,6 @@ class Message(models.Model):
     
     def create_reaction(self, user, emoji):
         """Create or update reaction for this message"""
-        from .models import MessageReaction
         reaction, created = MessageReaction.objects.get_or_create(
             message=self,
             user=user,
@@ -242,7 +242,6 @@ class Message(models.Model):
     @property
     def reaction_summary(self):
         """Get summary of reactions"""
-        from django.db.models import Count
         reactions = self.reactions.values('emoji').annotate(count=Count('emoji')).order_by('-count')
         return list(reactions)
 
@@ -310,11 +309,11 @@ class MessageMedia(models.Model):
     
     @property
     def url(self):
-        return self.file.url
+        return self.file.url if self.file else None
     
     @property
     def download_url(self):
-        return self.file.url
+        return self.file.url if self.file else None
     
     @property
     def formatted_size(self):
@@ -322,17 +321,17 @@ class MessageMedia(models.Model):
         if not self.file_size:
             return "Unknown"
         
+        size = float(self.file_size)
         for unit in ['B', 'KB', 'MB', 'GB']:
-            if self.file_size < 1024.0:
-                return f"{self.file_size:.1f} {unit}"
-            self.file_size /= 1024.0
-        return f"{self.file_size:.1f} TB"
+            if size < 1024.0:
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} TB"
     
     def delete(self, *args, **kwargs):
         """Delete file from storage when model is deleted"""
-        if self.file:
-            if os.path.isfile(self.file.path):
-                os.remove(self.file.path)
+        if self.file and os.path.isfile(self.file.path):
+            os.remove(self.file.path)
         if self.thumbnail and os.path.isfile(self.thumbnail.path):
             os.remove(self.thumbnail.path)
         super().delete(*args, **kwargs)
@@ -584,8 +583,6 @@ class CallQuality(models.Model):
     @classmethod
     def average_quality(cls, call_id):
         """Calculate average quality metrics for a call"""
-        from django.db.models import Avg
-        
         logs = cls.objects.filter(call_id=call_id)
         if not logs.exists():
             return None
@@ -613,7 +610,7 @@ class CallQuality(models.Model):
             return None
         
         # Count by quality status
-        status_counts = logs.values('quality_status').annotate(count=models.Count('id'))
+        status_counts = logs.values('quality_status').annotate(count=Count('id'))
         
         # Get quality trends
         trends = logs.order_by('measured_at').values(
