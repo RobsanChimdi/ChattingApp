@@ -22,7 +22,7 @@ from .models import (
     MessageReaction, Call, CallParticipant, CallQuality
 )
 from .serializers import (
-    UserSerializer, UserProfileSerializer, ChatSerializer, 
+    UserSerializer, UserProfileSerializer, ChatSerializer, ChatUpdateSerializer, 
     ChatListSerializer, MessageSerializer, MessageMediaSerializer,
     MessageStatusSerializer, MessageReactionSerializer, CallSerializer,
     CallParticipantSerializer, CallQualitySerializer, CallUpdateSerializer,
