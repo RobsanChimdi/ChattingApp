@@ -200,7 +200,26 @@ class ChatSerializer(serializers.ModelSerializer):
             }
         return None
 
-
+# In serializers.py - Add this new serializer
+class ChatUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating chat info (limited fields)"""
+    class Meta:
+        model = Chat
+        fields = ['name', 'description', 'image']
+        read_only_fields = ['id', 'chat_type', 'created_at', 'updated_at']
+    
+    def validate_name(self, value):
+        if len(value) < 1:
+            raise serializers.ValidationError("Chat name cannot be empty")
+        if len(value) > 100:
+            raise serializers.ValidationError("Chat name cannot exceed 100 characters")
+        return value
+    
+    def validate_description(self, value):
+        if value and len(value) > 500:
+            raise serializers.ValidationError("Description cannot exceed 500 characters")
+        return value
+    
 class MessageMediaSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField(read_only=True)
     thumbnail_url = serializers.SerializerMethodField(read_only=True)
