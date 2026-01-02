@@ -1,0 +1,367 @@
+import { useState } from 'react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Badge } from '@/components/ui/badge';
+import {
+  Reply,
+  Edit,
+  Trash2,
+  Copy,
+  Forward,
+  MoreVertical,
+  Check,
+  CheckCheck,
+  Clock,
+  Image as ImageIcon,
+  Video,
+  File,
+  Download
+} from 'lucide-react';
+import { useMessages } from '@/hooks/useMessages';
+import { useAuth } from '@/hooks/useAuth';
+import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
+import type { Message } from '@/types';
+
+interface MessageBubbleProps {
+  message: Message;
+  isSelected?: boolean;
+}
+
+export function MessageBubble({ message, isSelected }: MessageBubbleProps) {
+  const { user } = useAuth();
+  const {
+    selectMessage,
+    setReplyTo,
+    canEditMessage,
+    canDeleteMessage,
+    editMessage,
+    deleteMessage,
+    forwardMessage
+  } = useMessages();
+  
+  const [isHovered, setIsHovered] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(message.text || '');
+  
+  const isOwnMessage = message.sender.id === user?.id;
+  const isDeleted = message.is_deleted;
+  const hasMedia = message.media && message.media.length > 0;
+  const isForwarded = message.is_forwarded;
+  const hasReply = message.reply_to;
+
+  const handleEdit = async () => {
+    if (editText.trim() && editText !== message.text) {
+      await editMessage(message.id, editText);
+    }
+    setIsEditing(false);
+  };
+
+  const handleDelete = async () => {
+    await deleteMessage(message.id);
+  };
+
+  const handleCopy = () => {
+    if (message.text) {
+      navigator.clipboard.writeText(message.text);
+    }
+  };
+
+  const handleForward = async () => {
+    // In a real app, this would open a dialog to select a chat
+    const targetChatId = prompt('Enter target chat ID:');
+    if (targetChatId) {
+      await forwardMessage(targetChatId);
+    }
+  };
+
+  const renderStatusIcon = () => {
+    if (!isOwnMessage) return null;
+    
+    switch (message.status) {
+      case 'sent':
+        return <Check className="h-3 w-3 text-muted-foreground" />;
+      case 'delivered':
+        return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
+      case 'read':
+        return <CheckCheck className="h-3 w-3 text-blue-500" />;
+      default:
+        return <Clock className="h-3 w-3 text-muted-foreground" />;
+    }
+  };
+
+  const renderMedia = () => {
+    if (!hasMedia || !message.media) return null;
+
+    return message.media.map((media) => {
+      if (media.mime_type.startsWith('image/')) {
+        return (
+          <div key={media.id} className="relative group">
+            <img
+              src={media.url}
+              alt={media.file_name}
+              className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+              onClick={() => window.open(media.url, '_blank')}
+            />
+            <Button
+              size="icon"
+              variant="secondary"
+              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={() => window.open(media.download_url, '_blank')}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+        );
+      } else if (media.mime_type.startsWith('video/')) {
+        return (
+          <div key={media.id} className="relative group">
+            <video
+              src={media.url}
+              controls
+              className="rounded-lg max-w-full max-h-64"
+              poster={media.thumbnail}
+            />
+            <Button
+              size="icon"
+              variant="secondary"
+              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={() => window.open(media.download_url, '_blank')}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+        );
+      } else {
+        return (
+          <div
+            key={media.id}
+            className="flex items-center space-x-3 p-3 bg-muted rounded-lg"
+          >
+            <File className="h-6 w-6" />
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-sm truncate">{media.file_name}</p>
+              <p className="text-xs text-muted-foreground">
+                {(media.file_size / 1024 / 1024).toFixed(2)} MB
+              </p>
+            </div>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => window.open(media.download_url, '_blank')}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+        );
+      }
+    });
+  };
+
+  if (isDeleted) {
+    return (
+      <div className={cn(
+        "flex",
+        isOwnMessage ? "justify-end" : "justify-start"
+      )}>
+        <div className={cn(
+          "max-w-[70%] px-4 py-2 rounded-lg text-sm italic text-muted-foreground",
+          "bg-muted/50"
+        )}>
+          Message deleted
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex group",
+        isOwnMessage ? "justify-end" : "justify-start"
+      )}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* Sender avatar for incoming messages */}
+      {!isOwnMessage && (
+        <Avatar className="h-8 w-8 mt-1 mr-2">
+          <AvatarImage src={message.sender.profile_image} />
+          <AvatarFallback>
+            {message.sender.username?.charAt(0).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+      )}
+
+      <div className="max-w-[70%] space-y-1">
+        {/* Forwarded indicator */}
+        {isForwarded && (
+          <div className="flex items-center text-xs text-muted-foreground">
+            <Forward className="h-3 w-3 mr-1" />
+            Forwarded
+          </div>
+        )}
+
+        {/* Reply preview */}
+        {hasReply && message.reply_to && (
+          <div className={cn(
+            "px-3 py-2 rounded-lg text-sm border-l-4",
+            "bg-muted/50 border-primary"
+          )}>
+            <p className="font-medium text-xs">
+              {message.reply_to.sender.username}
+            </p>
+            <p className="text-xs truncate">
+              {message.reply_to.text || '📷 Photo' || '🎥 Video' || '📄 File'}
+            </p>
+          </div>
+        )}
+
+        {/* Message bubble */}
+        <div className="relative">
+          <div className={cn(
+            "px-4 py-2 rounded-lg",
+            isOwnMessage
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted",
+            isSelected && "ring-2 ring-primary"
+          )}>
+            {/* Sender name for group chats */}
+            {!isOwnMessage && message.chat?.chat_type === 'group' && (
+              <p className="font-medium text-xs mb-1">
+                {message.sender.username}
+              </p>
+            )}
+
+            {/* Media content */}
+            {hasMedia && renderMedia()}
+
+            {/* Text content */}
+            {message.text && !isEditing && (
+              <p className="whitespace-pre-wrap break-words">{message.text}</p>
+            )}
+
+            {/* Edit form */}
+            {isEditing && (
+              <div className="space-y-2">
+                <textarea
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  className="w-full bg-background text-foreground rounded p-2"
+                  rows={3}
+                  autoFocus
+                />
+                <div className="flex justify-end space-x-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setIsEditing(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleEdit}>
+                    Save
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Reactions */}
+            {message.reactions && message.reactions.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {message.reactions.map((reaction) => (
+                  <Badge
+                    key={reaction.id}
+                    variant="secondary"
+                    className="text-xs"
+                  >
+                    {reaction.emoji}
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {/* Message info */}
+            <div className={cn(
+              "flex items-center justify-end space-x-2 mt-1 text-xs",
+              isOwnMessage ? "text-primary-foreground/80" : "text-muted-foreground"
+            )}>
+              <span>
+                {format(new Date(message.created_at), 'HH:mm')}
+              </span>
+              {renderStatusIcon()}
+            </div>
+          </div>
+
+          {/* Message actions */}
+          {(isHovered || isSelected) && !isEditing && (
+            <div className={cn(
+              "absolute flex items-center space-x-1 -top-2",
+              isOwnMessage ? "right-2" : "left-2"
+            )}>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="h-6 w-6 shadow-md"
+                  >
+                    <MoreVertical className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align={isOwnMessage ? "end" : "start"}>
+                  <DropdownMenuItem onClick={() => setReplyTo(message)}>
+                    <Reply className="h-4 w-4 mr-2" />
+                    Reply
+                  </DropdownMenuItem>
+                  
+                  {message.text && (
+                    <DropdownMenuItem onClick={handleCopy}>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy
+                    </DropdownMenuItem>
+                  )}
+                  
+                  <DropdownMenuItem onClick={handleForward}>
+                    <Forward className="h-4 w-4 mr-2" />
+                    Forward
+                  </DropdownMenuItem>
+                  
+                  {canEditMessage(message) && (
+                    <DropdownMenuItem onClick={() => setIsEditing(true)}>
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit
+                    </DropdownMenuItem>
+                  )}
+                  
+                  {canDeleteMessage(message) && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={handleDelete}
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Sender avatar for own messages (empty space for alignment) */}
+      {isOwnMessage && <div className="w-8" />}
+    </div>
+  );
+}
