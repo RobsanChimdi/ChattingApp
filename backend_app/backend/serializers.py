@@ -22,12 +22,17 @@ class UserSerializer(serializers.ModelSerializer):
             'password': {'write_only': True},
             'email': {'required': False}
         }
-    
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("THis email is already inuse")
+
+        return super().validate(value)
     def validate_username(self, value):
         if not value:
             raise serializers.ValidationError("Username cannot be empty.")
         if len(value) < 3:
             raise serializers.ValidationError("Username must be at least 3 characters long.")
+        
         return value
     
     def validate_phone_number(self, value):
