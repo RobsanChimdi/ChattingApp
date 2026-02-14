@@ -26,6 +26,8 @@ SECRET_KEY = 'django-insecure-ks4pxomzf3c8tnem_z)jt=((nk0j7!1gh7_++1aztqvd)6^313
 DEBUG = True
 
 ALLOWED_HOSTS = []
+AUTH_USER_MODEL = 'backend.User'
+
 
 
 # Application definition
@@ -37,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+     'backend', 
 ]
 
 MIDDLEWARE = [
@@ -74,10 +77,15 @@ WSGI_APPLICATION = 'backend_app.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',  # MySQL engine
+        'NAME': 'chattingdb',                 # Your database name
+        'USER': 'root',                 # MySQL username
+        'PASSWORD': '@Robsan1234',         # MySQL password
+        'HOST': 'localhost',
+        'PORT': '3306',
     }
 }
+
 
 
 # Password validation

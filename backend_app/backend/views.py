@@ -17,6 +17,16 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 
+from uuid import uuid4
+from datetime import timedelta
+import mimetypes
+from django.utils import timezone
+from django.core.mail import send_mail
+from django.contrib.auth import authenticate
+
+from rest_framework.authtoken.models import Token
+
+
 from .models import (
     User, Chat, Message, MessageMedia, MessageStatus, 
     MessageReaction, Call, CallParticipant, CallQuality
@@ -26,7 +36,9 @@ from .serializers import (
     ChatListSerializer, MessageSerializer, MessageMediaSerializer,
     MessageStatusSerializer, MessageReactionSerializer, CallSerializer,
     CallParticipantSerializer, CallQualitySerializer, CallUpdateSerializer,
-    MessageSummarySerializer, CallJoinSerializer
+    MessageSummarySerializer, CallJoinSerializer,
+    PasswordResetSerializer, EmailVerificationSerializer,
+    PasswordResetRequestSerializer
 )
 
 # Define a standard pagination class
@@ -36,71 +48,154 @@ class StandardPagination(PageNumberPagination):
     max_page_size = 100
 
 
-# ========== AUTHENTICATION VIEWS ==========
 class RegisterView(generics.CreateAPIView):
     permission_classes = [AllowAny]
     serializer_class = UserSerializer
-    
+
     def create(self, request, *args, **kwargs):
-        from django.contrib.auth import authenticate
-        from rest_framework.authtoken.models import Token
-        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        
-        # Auto-login after registration
-        username = serializer.validated_data.get('username')
-        password = request.data.get('password')
-        
-        if username and password:
-            user = authenticate(username=username, password=password)
-            if user:
-                token, created = Token.objects.get_or_create(user=user)
-                return Response({
-                    'token': token.key,
-                    'user': UserSerializer(user).data
-                }, status=status.HTTP_201_CREATED)
-        
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        user = serializer.save(is_verified=False)  # User starts as not verified
+
+        # Generate verification code
+        code = str(uuid4().int)[:6]  # 6-digit code
+        user.verification_code = code
+        user.save()
+
+        # Send verification email
+        send_mail(
+            subject="Verify Your Account",
+            message=f"Your verification code is: {code}",
+            from_email="noreply@yourapp.com",
+            recipient_list=[user.email]
+        )
+
+        return Response(
+            {"message": "User created. Verification code sent to email."},
+            status=status.HTTP_201_CREATED
+        )
 
 
+# -------------------------------
+# Verify Email
+# -------------------------------
+class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = EmailVerificationSerializer
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data['email']
+        code = serializer.validated_data['verification_code']
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "User not found."}, status=404)
+
+        if user.verification_code == code:
+            user.is_verified = True
+            user.verification_code = None
+            user.save()
+            return Response({"status": "verified"})
+        else:
+            return Response({"error": "Invalid verification code."}, status=400)
+
+
+# -------------------------------
+# Login
+# -------------------------------
 class LoginView(APIView):
     permission_classes = [AllowAny]
-    
+
     def post(self, request):
-        from django.contrib.auth import authenticate
-        from rest_framework.authtoken.models import Token
-        
         username = request.data.get('username')
         password = request.data.get('password')
-        
+
         if not username or not password:
             return Response(
                 {'error': 'Please provide both username and password'},
-                status=status.HTTP_400_BAD_REQUEST
+                status=400
             )
-        
+
         user = authenticate(username=username, password=password)
-        
+
         if not user:
-            return Response(
-                {'error': 'Invalid credentials'},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        
+            return Response({'error': 'Invalid credentials'}, status=401)
+
+        if not user.is_verified:
+            return Response({'error': 'Email not verified'}, status=403)
+
         # Update last seen
         user.update_last_seen()
-        
-        # Create or get token
-        token, created = Token.objects.get_or_create(user=user)
-        
-        return Response({
-            'token': token.key,
-            'user': UserSerializer(user).data
-        })
+
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({'token': token.key, 'user': UserSerializer(user).data})
 
 
+# -------------------------------
+# Password Reset Request
+# -------------------------------
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = PasswordResetRequestSerializer
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data['email']
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+
+        # Generate reset token
+        token = uuid4()
+        user.reset_token = token
+        user.reset_token_expiry = timezone.now() + timedelta(hours=1)
+        user.save()
+
+        # Send email
+        send_mail(
+            subject="Password Reset",
+            message=f"Your password reset token is: {token}",
+            from_email="noreply@yourapp.com",
+            recipient_list=[user.email]
+        )
+
+        return Response({"status": "reset_email_sent"})
+
+
+# -------------------------------
+# Password Reset Confirm
+# -------------------------------
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = PasswordResetSerializer
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        token = serializer.validated_data['reset_token']
+        new_password = serializer.validated_data['new_password']
+
+        try:
+            user = User.objects.get(reset_token=token, reset_token_expiry__gte=timezone.now())
+        except User.DoesNotExist:
+            return Response({"error": "Invalid or expired token"}, status=400)
+
+        user.set_password(new_password)
+        user.reset_token = None
+        user.reset_token_expiry = None
+        user.save()
+
+        return Response({"status": "password_reset_success"})
+    
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     
@@ -145,7 +240,7 @@ class CurrentUserView(generics.RetrieveAPIView):
 class UpdateProfileView(generics.UpdateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = UserProfileSerializer
-    parser_classes = [MultiPartParser, FormParser, JSONParser]  # ✅ Add parsers
+    parser_classes = [MultiPartParser, FormParser, JSONParser] 
     
     def get_object(self):
         return self.request.user
@@ -454,14 +549,11 @@ class UnreadMessageCountView(APIView):
         return Response(counts)
 
 
-# ========== MESSAGE VIEWS ==========
+# ========== MESSAGE VIEWS (FIXED) ==========
 class MessageCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = MessageSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    
-    def perform_create(self, serializer):
-        serializer.save(sender=self.request.user)
     
     def create(self, request, *args, **kwargs):
         # Handle file uploads if present
@@ -474,277 +566,46 @@ class MessageCreateView(generics.CreateAPIView):
         """Create message with file attachments"""
         data = request.data.copy()
         
+        # Determine message type from files
+        files = request.FILES.getlist('files')
+        if files:
+            # Set message type based on first file
+            first_file = files[0]
+            mime_type, _ = mimetypes.guess_type(first_file.name)
+            if mime_type:
+                if mime_type.startswith('image/'):
+                    data['message_type'] = 'image'
+                elif mime_type.startswith('video/'):
+                    data['message_type'] = 'video'
+                elif mime_type.startswith('audio/'):
+                    data['message_type'] = 'audio'
+                else:
+                    data['message_type'] = 'file'
+            else:
+                data['message_type'] = 'file'
+        
         # Create message first
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         message = serializer.save(sender=request.user)
         
-        # Handle file uploads
-        files = request.FILES.getlist('files')
+        # Handle file uploads and create media objects
+        media_objects = []
         for file in files:
-            MessageMedia.objects.create(
+            media = MessageMedia.objects.create(
                 message=message,
                 file=file
             )
+            media_objects.append(media)
         
         # Return complete message with media
-        serializer = self.get_serializer(message)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        response_serializer = self.get_serializer(message)
+        response_data = response_serializer.data
+        response_data['media'] = MessageMediaSerializer(media_objects, many=True, context={'request': request}).data
+        
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 
-class EditMessageView(generics.UpdateAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = MessageSerializer
-    
-    def get_object(self):
-        message_id = self.kwargs.get('message_id')
-        message = get_object_or_404(Message, id=message_id)
-        
-        # Check if user is a participant in the chat
-        if not message.chat.participants.filter(id=self.request.user.id).exists():
-            raise PermissionDenied("Not a participant in this chat")
-        
-        if message.is_deleted:
-            raise ValidationError("Cannot edit deleted message")
-        
-        if message.sender != self.request.user:
-            raise PermissionDenied("Only message owner can edit")
-        
-        return message
-    
-    def update(self, request, *args, **kwargs):
-        message = self.get_object()
-        
-        # Only allow text field to be updated
-        partial_data = {'text': request.data.get('text')}
-        
-        if not partial_data['text']:
-            return Response({"error": "text is required"}, 
-                          status=status.HTTP_400_BAD_REQUEST)
-        
-        serializer = self.get_serializer(message, data=partial_data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        
-        # Use model's edit_message method
-        try:
-            message.edit_message(partial_data['text'], request.user)
-        except ValueError as e:
-            return Response({"error": str(e)}, 
-                          status=status.HTTP_400_BAD_REQUEST)
-        
-        return Response(serializer.data)
-
-class SoftDeleteMessageView(APIView):
-    permission_classes = [IsAuthenticated]
-    
-    def delete(self, request, message_id):
-        try:
-            message = Message.objects.get(id=message_id)
-        except Message.DoesNotExist:
-            return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if user is a participant in the chat
-        if not message.chat.participants.filter(id=request.user.id).exists():
-            raise PermissionDenied("Not a participant in this chat")
-        
-        if message.is_deleted:
-            return Response({"error": "Message already deleted"}, 
-                          status=status.HTTP_400_BAD_REQUEST)
-        
-        message.soft_delete(request.user)
-        return Response({"status": "message_deleted"})
-
-
-class ReactToMessageView(generics.CreateAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = MessageReactionSerializer
-    
-    def create(self, request, *args, **kwargs):
-        message_id = self.kwargs.get('message_id')
-        try:
-            message = Message.objects.get(id=message_id)
-        except Message.DoesNotExist:
-            return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if user is a participant in the chat
-        if not message.chat.participants.filter(id=request.user.id).exists():
-            raise PermissionDenied("Not a participant in this chat")
-        
-        # Add message to request data
-        data = request.data.copy()
-        data['message'] = message.id
-        data['user'] = request.user.id
-        
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        reaction = serializer.save()
-        
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-class RemoveReactionView(APIView):
-    permission_classes = [IsAuthenticated]
-    
-    def delete(self, request, message_id):
-        try:
-            message = Message.objects.get(id=message_id)
-        except Message.DoesNotExist:
-            return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if user is a participant in the chat
-        if not message.chat.participants.filter(id=request.user.id).exists():
-            raise PermissionDenied("Not a participant in this chat")
-        
-        try:
-            reaction = message.reactions.get(user=request.user)
-            reaction.delete()
-            return Response({"status": "reaction_removed"})
-        except MessageReaction.DoesNotExist:
-            return Response({"error": "Reaction not found"}, 
-                          status=status.HTTP_404_NOT_FOUND)
-
-
-class ForwardMessageView(APIView):
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request, message_id):
-        try:
-            message = Message.objects.get(id=message_id)
-        except Message.DoesNotExist:
-            return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if user is a participant in the chat
-        if not message.chat.participants.filter(id=request.user.id).exists():
-            raise PermissionDenied("Not a participant in this chat")
-        
-        chat_id = request.data.get('chat_id')
-        if not chat_id:
-            return Response({"error": "chat_id is required"}, 
-                          status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            chat = Chat.objects.get(id=chat_id)
-            
-            # Check if user is participant in destination chat
-            if not chat.participants.filter(id=request.user.id).exists():
-                raise PermissionDenied("Not a participant in destination chat")
-            
-            # Create forwarded message
-            forwarded_message = Message.objects.create(
-                chat=chat,
-                sender=request.user,
-                message_type=message.message_type,
-                text=message.text,
-                is_forwarded=True,
-                reply_to=None
-            )
-            
-            # Copy media if any
-            for media in message.media.all():
-                MessageMedia.objects.create(
-                    message=forwarded_message,
-                    file=media.file,
-                    thumbnail=media.thumbnail,
-                    file_name=media.file_name,
-                    file_size=media.file_size,
-                    mime_type=media.mime_type,
-                    duration=media.duration,
-                    width=media.width,
-                    height=media.height
-                )
-            
-            # Mark original as forwarded
-            message.mark_as_forwarded()
-            
-            serializer = MessageSerializer(forwarded_message)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
-        except Chat.DoesNotExist:
-            return Response({"error": "Chat not found"}, 
-                          status=status.HTTP_404_NOT_FOUND)
-
-
-class MarkMessageReadView(APIView):
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request, message_id):
-        try:
-            message = Message.objects.get(id=message_id)
-        except Message.DoesNotExist:
-            return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if user is a participant in the chat
-        if not message.chat.participants.filter(id=request.user.id).exists():
-            raise PermissionDenied("Not a participant in this chat")
-        
-        try:
-            status_obj = message.statuses.get(user=request.user)
-            status_obj.mark_as_read()
-            return Response({"status": "marked_as_read"})
-        except MessageStatus.DoesNotExist:
-            return Response({"error": "Message status not found"}, 
-                          status=status.HTTP_404_NOT_FOUND)
-
-
-class MarkAllReadView(APIView):
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        chat_id = request.data.get('chat_id')
-        if not chat_id:
-            return Response({"error": "chat_id is required"}, 
-                          status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            chat = Chat.objects.get(id=chat_id)
-            
-            # Check if user is participant
-            if not chat.participants.filter(id=request.user.id).exists():
-                raise PermissionDenied("Not a participant in this chat")
-            
-            # Mark all unread messages as read
-            unread_messages = Message.objects.filter(
-                chat=chat,
-                statuses__user=request.user,
-                statuses__status__in=['sent', 'delivered']
-            )
-            
-            for message in unread_messages:
-                status_obj = message.statuses.get(user=request.user)
-                status_obj.mark_as_read()
-            
-            return Response({"status": "all_marked_as_read", "count": unread_messages.count()})
-            
-        except Chat.DoesNotExist:
-            return Response({"error": "Chat not found"}, 
-                          status=status.HTTP_404_NOT_FOUND)
-
-
-class SearchMessageView(generics.ListAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = MessageSummarySerializer
-    pagination_class = StandardPagination
-    
-    def get_queryset(self):
-        query = self.request.query_params.get('q', '')
-        chat_id = self.request.query_params.get('chat_id')
-        
-        if not query or len(query) < 2:
-            return Message.objects.none()
-        
-        messages = Message.objects.filter(
-            Q(text__icontains=query) &
-            Q(chat__participants=self.request.user) &
-            Q(is_deleted=False)
-        )
-        
-        if chat_id:
-            messages = messages.filter(chat_id=chat_id)
-        
-        return messages.select_related('sender', 'chat').order_by('-created_at')
-
-
-# ========== MEDIA VIEWS ==========
 class MediaUploadView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = MessageMediaSerializer
@@ -765,11 +626,24 @@ class MediaUploadView(generics.CreateAPIView):
                 if not chat.participants.filter(id=request.user.id).exists():
                     raise PermissionDenied("Not a participant in this chat")
                 
+                # Determine message type from file
+                file = request.FILES.get('file')
+                message_type = 'file'
+                if file:
+                    mime_type, _ = mimetypes.guess_type(file.name)
+                    if mime_type:
+                        if mime_type.startswith('image/'):
+                            message_type = 'image'
+                        elif mime_type.startswith('video/'):
+                            message_type = 'video'
+                        elif mime_type.startswith('audio/'):
+                            message_type = 'audio'
+                
                 # Create message
                 message = Message.objects.create(
                     chat=chat,
                     sender=request.user,
-                    message_type='image'
+                    message_type=message_type
                 )
                 request.data['message'] = message.id
                 
@@ -780,109 +654,258 @@ class MediaUploadView(generics.CreateAPIView):
         return super().create(request, *args, **kwargs)
 
 
-class MediaDownloadView(APIView):
+# ========== CHAT VIEWS (FIXED) ==========
+class ChatListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
-    
-    def get(self, request, media_id):
-        try:
-            media = MessageMedia.objects.get(id=media_id)
-        except MessageMedia.DoesNotExist:
-            return Response({"error": "Media not found"}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if user is a participant in the chat
-        if not media.message.chat.participants.filter(id=request.user.id).exists():
-            raise PermissionDenied("Not a participant in this chat")
-        
-        return Response({
-            'url': media.url,
-            'download_url': media.download_url,
-            'file_name': media.filename
-        })
-
-
-class MediaInfoView(generics.RetrieveAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = MessageMediaSerializer
-    
-    def get_object(self):
-        media_id = self.kwargs.get('media_id')
-        media = get_object_or_404(MessageMedia, id=media_id)
-        
-        # Check if user is a participant in the chat
-        if not media.message.chat.participants.filter(id=self.request.user.id).exists():
-            raise PermissionDenied("Not a participant in this chat")
-        
-        return media
-
-
-class ChatMediaView(generics.ListAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = MessageMediaSerializer
     pagination_class = StandardPagination
     
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return ChatListSerializer
+        return ChatSerializer
+    
     def get_queryset(self):
-        chat_id = self.request.query_params.get('chat_id')
-        if not chat_id:
-            return MessageMedia.objects.none()
-        
-        try:
-            chat = Chat.objects.get(id=chat_id)
-            
-            # Check if user is participant
-            if not chat.participants.filter(id=self.request.user.id).exists():
-                raise PermissionDenied("Not a participant in this chat")
-            
-            return MessageMedia.objects.filter(
-                message__chat=chat
-            ).select_related('message').order_by('-uploaded_at')
-            
-        except Chat.DoesNotExist:
-            return MessageMedia.objects.none()
-
-
-# ========== CALL VIEWS ==========
-class CallCreateView(generics.CreateAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = CallSerializer
+        return Chat.objects.filter(
+            participants=self.request.user,
+            is_active=True
+        ).prefetch_related(
+            'participants', 
+            'messages'
+        ).order_by('-updated_at')
+    
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
     
     def perform_create(self, serializer):
-        serializer.save(initiated_by=self.request.user)
+        chat = serializer.save()
+        if self.request.user not in chat.participants.all():
+            chat.participants.add(self.request.user)
 
 
-class CallDetailView(generics.RetrieveAPIView):
+class CreatePrivateChatView(APIView):
     permission_classes = [IsAuthenticated]
-    serializer_class = CallSerializer
     
-    def get_object(self):
-        call_id = self.kwargs.get('call_id')
-        call = get_object_or_404(Call, id=call_id)
+    def post(self, request):
+        participant_id = request.data.get('participant_id')
         
-        # Check if user is a participant in the chat
-        if not call.chat.participants.filter(id=self.request.user.id).exists():
+        if not participant_id:
+            return Response({"error": "participant_id is required"}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            participant = User.objects.get(id=participant_id, is_active=True)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, 
+                          status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if private chat already exists
+        existing_chat = Chat.objects.filter(
+            chat_type='private',
+            participants=request.user
+        ).filter(participants=participant).first()
+        
+        if existing_chat:
+            serializer = ChatSerializer(existing_chat, context={'request': request})
+            return Response(serializer.data)
+        
+        # Create new private chat
+        chat = Chat.objects.create(chat_type='private')
+        chat.participants.add(request.user, participant)
+        
+        serializer = ChatSerializer(chat, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AddParticipantView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, chat_id):
+        try:
+            chat = Chat.objects.get(id=chat_id, is_active=True)
+        except Chat.DoesNotExist:
+            return Response({"error": "Chat not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if user is a participant
+        if not chat.participants.filter(id=request.user.id).exists():
             raise PermissionDenied("Not a participant in this chat")
         
-        return call
-
-
-class UpdateCallView(generics.UpdateAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = CallUpdateSerializer
-    
-    def get_object(self):
-        call_id = self.kwargs.get('call_id')
-        call = get_object_or_404(Call, id=call_id)
+        # Check if user has permission (admin or creator)
+        if chat.chat_type != 'private' and chat.admin != request.user:
+            raise PermissionDenied("Only admin can add participants")
         
-        # Check if user is a participant in the chat
-        if not call.chat.participants.filter(id=self.request.user.id).exists():
+        user_id = request.data.get('user_id')
+        try:
+            user = User.objects.get(id=user_id, is_active=True)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, 
+                          status=status.HTTP_404_NOT_FOUND)
+        
+        if chat.participants.filter(id=user.id).exists():
+            return Response({"error": "User already in chat"}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        chat.participants.add(user)
+        return Response({"status": "participant_added"})
+
+
+class RemoveParticipantView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, chat_id):
+        try:
+            chat = Chat.objects.get(id=chat_id, is_active=True)
+        except Chat.DoesNotExist:
+            return Response({"error": "Chat not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if user is a participant
+        if not chat.participants.filter(id=request.user.id).exists():
             raise PermissionDenied("Not a participant in this chat")
         
-        # Only initiator or admin can update
-        if call.initiated_by != self.request.user and call.chat.admin != self.request.user:
-            raise PermissionDenied("Only initiator or admin can update call")
+        # Check if user has permission (admin or creator)
+        if chat.chat_type != 'private' and chat.admin != request.user:
+            raise PermissionDenied("Only admin can remove participants")
         
-        return call
+        user_id = request.data.get('user_id')
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, 
+                          status=status.HTTP_404_NOT_FOUND)
+        
+        if user == request.user:
+            return Response({"error": "Cannot remove yourself. Use leave chat instead."}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        if not chat.participants.filter(id=user.id).exists():
+            return Response({"error": "User not in chat"}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        chat.participants.remove(user)
+        return Response({"status": "participant_removed"})
 
 
+class LeaveChatView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, chat_id):
+        try:
+            chat = Chat.objects.get(id=chat_id, is_active=True)
+        except Chat.DoesNotExist:
+            return Response({"error": "Chat not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        if chat.chat_type == 'private':
+            return Response({"error": "Cannot leave private chat"}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        if not chat.participants.filter(id=request.user.id).exists():
+            return Response({"error": "Not a participant"}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        chat.participants.remove(request.user)
+        
+        # If admin leaves and there are other participants, assign new admin
+        if chat.admin == request.user and chat.participants.exists():
+            new_admin = chat.participants.first()
+            chat.admin = new_admin
+            chat.save()
+        
+        # If no participants left, deactivate chat
+        if not chat.participants.exists():
+            chat.is_active = False
+            chat.save()
+        
+        return Response({"status": "left_chat"})
+
+
+class UpdateChatInfoView(generics.UpdateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ChatUpdateSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    
+    def get_object(self):
+        chat_id = self.kwargs.get('chat_id')
+        chat = get_object_or_404(Chat, id=chat_id, is_active=True)
+        
+        # Check if user is a participant
+        if not chat.participants.filter(id=self.request.user.id).exists():
+            raise PermissionDenied("Not a participant in this chat")
+        
+        if chat.chat_type != 'group':
+            raise ValidationError("Only group chats can be updated")
+        
+        if chat.admin != self.request.user:
+            raise PermissionDenied("Only admin can update chat info")
+        
+        return chat
+    
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+
+class ChatMessagesView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = MessageSerializer
+    pagination_class = StandardPagination
+    
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
+    def get_queryset(self):
+        chat_id = self.kwargs.get('chat_id')
+        chat = get_object_or_404(Chat, id=chat_id, is_active=True)
+        
+        # Check if user is a participant
+        if not chat.participants.filter(id=self.request.user.id).exists():
+            raise PermissionDenied("Not a participant in this chat")
+        
+        # Mark messages as read (in bulk for efficiency)
+        MessageStatus.objects.filter(
+            message__chat=chat,
+            user=self.request.user,
+            status__in=['sent', 'delivered']
+        ).update(
+            status='read',
+            read_at=timezone.now()
+        )
+        
+        # Get messages
+        return Message.objects.filter(
+            chat=chat,
+            is_deleted=False
+        ).select_related('sender', 'reply_to').prefetch_related(
+            'media', 'reactions', 'statuses__user'
+        ).order_by('-created_at')
+
+
+class UnreadMessageCountView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        chats = Chat.objects.filter(
+            participants=request.user,
+            is_active=True
+        )
+        
+        counts = {}
+        for chat in chats:
+            # Manual count to avoid depending on model method
+            counts[chat.id] = Message.objects.filter(
+                ~Q(sender=request.user),
+                chat=chat,
+                statuses__user=request.user,
+                statuses__status__in=['sent', 'delivered']
+            ).count()
+        
+        return Response(counts)
+
+
+# ========== CALL VIEWS (FIXED) ==========
 class JoinCallView(APIView):
     permission_classes = [IsAuthenticated]
     
@@ -908,26 +931,24 @@ class JoinCallView(APIView):
                 existing_participant.left_at = None
                 existing_participant.save()
             
-            serializer = CallParticipantSerializer(existing_participant)
+            serializer = CallParticipantSerializer(existing_participant, context={'request': request})
             return Response(serializer.data)
         
-        # Create new participant using CallParticipantSerializer
-        participant_data = {
-            'call': call.id,
-            'user': request.user.id,
-            'role': 'participant'
-        }
-        
-        participant_serializer = CallParticipantSerializer(data=participant_data)
-        participant_serializer.is_valid(raise_exception=True)
-        participant = participant_serializer.save()
+        # Create new participant
+        participant = CallParticipant.objects.create(
+            call=call,
+            user=request.user,
+            role='participant',
+            is_video_enabled=request.data.get('enable_video', True)
+        )
         
         # Update call status if first participant joining initiated call
         if call.status == 'initiated' and call.participants.count() > 1:
             call.status = 'ongoing'
             call.save()
         
-        return Response(participant_serializer.data, status=status.HTTP_201_CREATED)
+        serializer = CallParticipantSerializer(participant, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class LeaveCallView(APIView):
@@ -945,11 +966,15 @@ class LeaveCallView(APIView):
         
         try:
             participant = call.participants.get(user=request.user)
-            participant.leave_call()
+            participant.left_at = timezone.now()
+            participant.save()
             
             # If no active participants left, end the call
-            if call.active_participant_count == 0:
-                call.end_call('completed')
+            active_count = call.participants.filter(left_at__isnull=True).count()
+            if active_count == 0:
+                call.status = 'completed'
+                call.ended_at = timezone.now()
+                call.save()
             
             return Response({"status": "left_call"})
             

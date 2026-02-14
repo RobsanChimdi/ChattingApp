@@ -2,9 +2,12 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 import os
+import uuid
+from datetime import timedelta
 from django.utils import timezone
 from django.db.models import Count, Q, Avg
 from django.db.models.functions import Trunc
+from django.utils.crypto import get_random_string
 
 class User(AbstractUser):
     profile_image = models.ImageField(upload_to="profiles/", blank=True, null=True)
@@ -20,6 +23,21 @@ class User(AbstractUser):
         choices=[("everyone", "Everyone"), ("contacts", "Contacts Only"), ("nobody", "Nobody")],
         default="everyone"
     )
+    verification_code = models.CharField(max_length=6, blank=True, null=True)
+    is_verified = models.BooleanField(default=False)
+
+    # Password reset
+    reset_token = models.UUIDField(blank=True, null=True)
+    reset_token_expiry = models.DateTimeField(blank=True, null=True)
+
+    def generate_verification_code(self):
+        self.verification_code = get_random_string(6, allowed_chars='0123456789')
+        self.save(update_fields=['verification_code'])
+    
+    def generate_reset_token(self, hours_valid=1):
+        self.reset_token = uuid.uuid4()
+        self.reset_token_expiry = timezone.now() + timedelta(hours=hours_valid)
+        self.save(update_fields=['reset_token', 'reset_token_expiry'])
     
     class Meta:
         ordering = ['username']
