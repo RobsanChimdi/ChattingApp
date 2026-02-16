@@ -1,3 +1,4 @@
+// store/auth.store.ts
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User } from '@/types/user.types';
@@ -10,6 +11,8 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  isEmailVerified: boolean;
+  verificationEmailSent: boolean;
 }
 
 interface AuthActions {
@@ -19,10 +22,23 @@ interface AuthActions {
     username: string;
     email: string;
     password: string;
+    confirm_password: string;
     first_name?: string;
     last_name?: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
+  
+  // Email verification
+  verifyEmail: (data: { email: string; verification_code: string }) => Promise<boolean>;
+  resendVerificationCode: (email: string) => Promise<void>;
+  
+  // Password reset
+  requestPasswordReset: (email: string) => Promise<void>;
+  resetPassword: (data: { 
+    reset_token: string; 
+    new_password: string; 
+    confirm_password: string;
+  }) => Promise<void>;
   
   // User actions
   setUser: (user: User | null) => void;
@@ -30,14 +46,18 @@ interface AuthActions {
   clearAuth: () => void;
   
   // Profile actions
-  updateProfile: (data: Partial<User>) => Promise<void>;
+  updateProfile: (data: FormData | Partial<User>) => Promise<User>;
   updateLastSeen: () => Promise<void>;
   setOffline: () => Promise<void>;
+  
+  // WebSocket token
+  getWebSocketToken: () => Promise<{ token: string; user_id: number }>;
   
   // Status
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
+  resetState: () => void;
 }
 
 export const useAuthStore = create<AuthState & AuthActions>()(
@@ -49,6 +69,8 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       isAuthenticated: false,
       isLoading: false,
       error: null,
+      isEmailVerified: false,
+      verificationEmailSent: false,
       
       // Authentication actions
       login: async (credentials) => {
@@ -56,18 +78,31 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         
         try {
           const response = await authService.login(credentials);
-              api.setToken(response.token);
-
+          
+          // Check if email is verified
+          if (response.user && !response.user.is_verified) {
+            set({ 
+              error: 'Please verify your email before logging in',
+              isLoading: false,
+              user: response.user,
+              token: response.token,
+            });
+            return;
+          }
+          
+          // Set token in API service
+          api.setToken(response.token);
           
           set({
             user: response.user,
             token: response.token,
             isAuthenticated: true,
+            isEmailVerified: response.user?.is_verified || false,
             isLoading: false,
           });
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || 'Login failed',
+            error: error.response?.data?.error || error.response?.data?.message || 'Login failed',
             isLoading: false,
             isAuthenticated: false,
           });
@@ -76,21 +111,26 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       },
       
       register: async (data) => {
-        set({ isLoading: true, error: null });
+        set({ isLoading: true, error: null, verificationEmailSent: false });
         
         try {
           const response = await authService.register(data);
-           api.setToken(response.token);
           
           set({
             user: response.user,
             token: response.token,
-            isAuthenticated: true,
+            isAuthenticated: false, // Not authenticated until email verified
+            isEmailVerified: false,
+            verificationEmailSent: true,
             isLoading: false,
           });
+          
+          // Don't set API token yet - user needs to verify email first
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || 'Registration failed',
+            error: error.response?.data?.error || 
+                  error.response?.data?.message || 
+                  'Registration failed',
             isLoading: false,
             isAuthenticated: false,
           });
@@ -103,11 +143,93 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         
         try {
           await authService.logout();
+          api.removeToken();
           get().clearAuth();
         } catch (error: any) {
-          set({ error: error.message, isLoading: false });
+          console.error('Logout error:', error);
         } finally {
           set({ isLoading: false });
+        }
+      },
+      
+      // Email verification
+      verifyEmail: async (data) => {
+        set({ isLoading: true, error: null });
+        
+        try {
+          const response = await authService.verifyEmail(data);
+          
+          if (response.status === 'verified') {
+            // Update user verification status
+            const currentUser = get().user;
+            if (currentUser) {
+              set({ 
+                user: { ...currentUser, is_verified: true },
+                isEmailVerified: true,
+                isAuthenticated: true, // Now authenticated
+                isLoading: false,
+              });
+              
+              // Set token now that email is verified
+              if (get().token) {
+                api.setToken(get().token!);
+              }
+            }
+            return true;
+          }
+          return false;
+        } catch (error: any) {
+          set({
+            error: error.response?.data?.error || 'Verification failed',
+            isLoading: false,
+          });
+          throw error;
+        }
+      },
+      
+      resendVerificationCode: async (email: string) => {
+        set({ isLoading: true, error: null });
+        
+        try {
+          await authService.resendVerificationCode(email);
+          set({ verificationEmailSent: true, isLoading: false });
+        } catch (error: any) {
+          set({
+            error: error.response?.data?.error || 'Failed to resend code',
+            isLoading: false,
+          });
+          throw error;
+        }
+      },
+      
+      // Password reset
+      requestPasswordReset: async (email: string) => {
+        set({ isLoading: true, error: null });
+        
+        try {
+          await authService.requestPasswordReset(email);
+          set({ isLoading: false });
+        } catch (error: any) {
+          set({
+            error: error.response?.data?.error || 'Failed to request password reset',
+            isLoading: false,
+          });
+          throw error;
+        }
+      },
+      
+      resetPassword: async (data) => {
+        set({ isLoading: true, error: null });
+        
+        try {
+          await authService.resetPassword(data);
+          set({ isLoading: false });
+        } catch (error: any) {
+          set({
+            error: error.response?.data?.error || 'Failed to reset password',
+            isLoading: false,
+          });
+          throw error;
         }
       },
       
@@ -116,19 +238,26 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         set({ 
           user,
           isAuthenticated: !!user,
+          isEmailVerified: user?.is_verified || false,
         });
       },
       
       setToken: (token) => {
         set({ token });
+        if (token) {
+          api.setToken(token);
+        }
       },
       
       clearAuth: () => {
+        api.removeToken();
         set({
           user: null,
           token: null,
           isAuthenticated: false,
           error: null,
+          isEmailVerified: false,
+          verificationEmailSent: false,
         });
       },
       
@@ -138,7 +267,12 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         
         try {
           const updatedUser = await authService.updateProfile(data);
-          set({ user: updatedUser, isLoading: false });
+          set({ 
+            user: updatedUser, 
+            isLoading: false,
+            isEmailVerified: updatedUser.is_verified,
+          });
+          return updatedUser;
         } catch (error: any) {
           set({
             error: error.response?.data?.error || 'Profile update failed',
@@ -164,10 +298,32 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         }
       },
       
+      // WebSocket token
+      getWebSocketToken: async () => {
+        try {
+          const response = await authService.getWebSocketToken();
+          return response;
+        } catch (error) {
+          console.error('Failed to get WebSocket token:', error);
+          throw error;
+        }
+      },
+      
       // Status
       setLoading: (loading) => set({ isLoading: loading }),
       setError: (error) => set({ error }),
       clearError: () => set({ error: null }),
+      resetState: () => {
+        set({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          isLoading: false,
+          error: null,
+          isEmailVerified: false,
+          verificationEmailSent: false,
+        });
+      },
     }),
     {
       name: 'auth-storage',
@@ -175,6 +331,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         user: state.user,
         token: state.token,
         isAuthenticated: state.isAuthenticated,
+        isEmailVerified: state.isEmailVerified,
       }),
     }
   )
@@ -185,3 +342,5 @@ export const useUser = () => useAuthStore((state) => state.user);
 export const useIsAuthenticated = () => useAuthStore((state) => state.isAuthenticated);
 export const useAuthLoading = () => useAuthStore((state) => state.isLoading);
 export const useAuthError = () => useAuthStore((state) => state.error);
+export const useIsEmailVerified = () => useAuthStore((state) => state.isEmailVerified);
+export const useVerificationEmailSent = () => useAuthStore((state) => state.verificationEmailSent);

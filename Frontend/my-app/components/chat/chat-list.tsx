@@ -53,9 +53,9 @@ export function ChatList({ onChatSelect, selectedChatId }: ChatListProps) {
   const getChatAvatar = useCallback((chat: Chat) => {
     if (chat.chat_type === 'private') {
       const otherUser = chat.participants.find(p => p.id !== user?.id);
-      return otherUser?.profile_image;
+      return otherUser?.profile_image || undefined;
     }
-    return chat.icon;
+    return chat.avatar || undefined;
   }, [user]);
 
   const getLastMessagePreview = useCallback((chat: Chat) => {
@@ -148,79 +148,85 @@ export function ChatList({ onChatSelect, selectedChatId }: ChatListProps) {
             </p>
           </div>
         ) : (
-          filteredChats.map((chat) => (
-            <Card
-              key={chat.id}
-              className={cn(
-                "border-0 border-b rounded-none cursor-pointer transition-colors hover:bg-muted/50",
-                selectedChatId === chat.id && "bg-muted"
-              )}
-              onClick={() => onChatSelect(chat)}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-start space-x-3">
-                  {/* Avatar */}
-                  <div className="relative">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={getChatAvatar(chat)} />
-                      <AvatarFallback>
-                        {getChatName(chat).charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    {chat.chat_type === 'group' && (
-                      <Badge 
-                        variant="secondary" 
-                        className="absolute -bottom-1 -right-1 h-5 w-5 p-0 flex items-center justify-center"
-                      >
-                        <Users className="h-3 w-3" />
-                      </Badge>
-                    )}
-                  </div>
-
-                  {/* Chat Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-semibold truncate">
-                        {getChatName(chat)}
-                      </h3>
-                      <span className="text-xs text-muted-foreground">
-                        {formatTime(chat.updated_at)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-1">
-                      <p className="text-sm text-muted-foreground truncate flex-1">
-                        {getLastMessagePreview(chat)}
-                      </p>
-                      {getUnreadCount(chat) > 0 && (
-                        <Badge className="ml-2">
-                          {getUnreadCount(chat)}
-                        </Badge>
+          filteredChats.map((chat) => {
+              const isRead = chat.last_message?.statuses?.some(
+                (s) => s.status === 'read'
+              );
+              return (
+                    <Card
+                      key={chat.id}
+                      className={cn(
+                        "border-0 border-b rounded-none cursor-pointer transition-colors hover:bg-muted/50",
+                        selectedChatId === chat.id && "bg-muted"
                       )}
-                    </div>
+                      onClick={() => onChatSelect(chat)}
+                    >
+                      <CardContent className="p-4">
+                        <div className="flex items-start space-x-3">
+                          {/* Avatar */}
+                          <div className="relative">
+                            <Avatar className="h-12 w-12">
+                              <AvatarImage src={getChatAvatar(chat)} />
+                              <AvatarFallback>
+                                {getChatName(chat).charAt(0).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            {chat.chat_type === 'group' && (
+                              <Badge 
+                                variant="secondary" 
+                                className="absolute -bottom-1 -right-1 h-5 w-5 p-0 flex items-center justify-center"
+                              >
+                                <Users className="h-3 w-3" />
+                              </Badge>
+                            )}
+                          </div>
 
-                    {/* Status indicators */}
-                    <div className="flex items-center space-x-2 mt-1">
-                      {chat.last_message?.sender.id === user?.id && (
-                        <span className="text-xs text-muted-foreground">
-                          {chat.last_message?.status === 'read' ? (
-                            <CheckCheck className="h-3 w-3 inline" />
-                          ) : (
-                            <Check className="h-3 w-3 inline" />
-                          )}
-                        </span>
-                      )}
-                      {chat.typing_users?.some(u => u.id !== user?.id) && (
-                        <span className="text-xs text-primary animate-pulse">
-                          typing...
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))
+                          {/* Chat Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <h3 className="font-semibold truncate">
+                                {getChatName(chat)}
+                              </h3>
+                              <span className="text-xs text-muted-foreground">
+                                {formatTime(chat.updated_at)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between mt-1">
+                              <p className="text-sm text-muted-foreground truncate flex-1">
+                                {getLastMessagePreview(chat)}
+                              </p>
+                              {getUnreadCount(chat) > 0 && (
+                                <Badge className="ml-2">
+                                  {getUnreadCount(chat)}
+                                </Badge>
+                              )}
+                            </div>
+
+                            {/* Status indicators */}
+                            <div className="flex items-center space-x-2 mt-1">
+                              {chat.last_message?.sender.id === user?.id && (
+                                
+                                    <span className="text-xs text-muted-foreground">
+                                      {isRead ? (
+                                        <CheckCheck className="h-3 w-3 inline" />
+                                      ) : (
+                                        <Check className="h-3 w-3 inline" />
+                                      )}
+                                    </span>
+                                  )}
+
+                              {chat.participants?.some(u => u.id !== user?.id) && (
+                                <span className="text-xs text-primary animate-pulse">
+                                  typing...
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) })
         )}
       </ScrollArea>
     </div>

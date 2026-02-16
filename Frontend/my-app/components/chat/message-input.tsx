@@ -17,7 +17,7 @@ import {
   Send,
   X
 } from 'lucide-react';
-import { useMessages } from '@/hooks/useMessages';
+import { useMessages } from '@/hooks/useMessage';
 import { useChat } from '@/hooks/useChat';
 import { cn } from '@/lib/utils';
 

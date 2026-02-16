@@ -24,18 +24,21 @@ import {
   File,
   Download
 } from 'lucide-react';
-import { useMessages } from '@/hooks/useMessages';
+import { useMessages } from '@/hooks/useMessage';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import type { Message } from '@/types';
+import type { ChatType } from '@/types/chat.types';
 
 interface MessageBubbleProps {
   message: Message;
+  chatType: ChatType;
   isSelected?: boolean;
 }
 
-export function MessageBubble({ message, isSelected }: MessageBubbleProps) {
+
+export function MessageBubble({ message, chatType, isSelected }: MessageBubbleProps) {
   const { user } = useAuth();
   const {
     selectMessage,
@@ -85,7 +88,7 @@ export function MessageBubble({ message, isSelected }: MessageBubbleProps) {
   const renderStatusIcon = () => {
     if (!isOwnMessage) return null;
     
-    switch (message.status) {
+    switch (message.statuses.slice(-1)[0]?.status) {
       case 'sent':
         return <Check className="h-3 w-3 text-muted-foreground" />;
       case 'delivered':
@@ -105,10 +108,10 @@ export function MessageBubble({ message, isSelected }: MessageBubbleProps) {
         return (
           <div key={media.id} className="relative group">
             <img
-              src={media.url}
+              src={media.file_url}
               alt={media.file_name}
               className="rounded-lg max-w-full max-h-64 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-              onClick={() => window.open(media.url, '_blank')}
+              onClick={() => window.open(media.file_url, '_blank')}
             />
             <Button
               size="icon"
@@ -124,7 +127,7 @@ export function MessageBubble({ message, isSelected }: MessageBubbleProps) {
         return (
           <div key={media.id} className="relative group">
             <video
-              src={media.url}
+              src={media.file_url}
               controls
               className="rounded-lg max-w-full max-h-64"
               poster={media.thumbnail}
@@ -193,7 +196,7 @@ export function MessageBubble({ message, isSelected }: MessageBubbleProps) {
       {/* Sender avatar for incoming messages */}
       {!isOwnMessage && (
         <Avatar className="h-8 w-8 mt-1 mr-2">
-          <AvatarImage src={message.sender.profile_image} />
+          <AvatarImage src={message.sender.profile_image ?? undefined} />
           <AvatarFallback>
             {message.sender.username?.charAt(0).toUpperCase()}
           </AvatarFallback>
@@ -234,7 +237,7 @@ export function MessageBubble({ message, isSelected }: MessageBubbleProps) {
             isSelected && "ring-2 ring-primary"
           )}>
             {/* Sender name for group chats */}
-            {!isOwnMessage && message.chat?.chat_type === 'group' && (
+            {!isOwnMessage && chatType === 'group' && (
               <p className="font-medium text-xs mb-1">
                 {message.sender.username}
               </p>

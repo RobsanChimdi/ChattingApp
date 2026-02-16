@@ -21,7 +21,7 @@ export function AudioIndicator({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number|undefined>(undefined);
   const [audioLevel, setAudioLevel] = useState(0);
   const [frequencyData, setFrequencyData] = useState<Uint8Array>(new Uint8Array(0));
 
@@ -257,7 +257,7 @@ export function useAudioLevel(stream: MediaStream | null, updateInterval = 100) 
   const [isSpeaking, setIsSpeaking] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | undefined>(undefined);
   const lastUpdateRef = useRef<number>(0);
 
   useEffect(() => {

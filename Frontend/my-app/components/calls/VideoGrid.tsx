@@ -50,7 +50,7 @@ export function VideoGrid({
   const getParticipantDisplay = (participant: CallParticipant) => {
     return {
       name: participant.user.username,
-      avatar: participant.user.profile_image,
+      avatar: participant.user.profile_image || undefined,
       isMuted: participant.is_muted,
       hasVideo: participant.has_video,
       isSpeaking: false // Would be calculated from audio levels

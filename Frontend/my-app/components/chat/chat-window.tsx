@@ -19,11 +19,12 @@ import {
   Menu
 } from 'lucide-react';
 import { useChat } from '@/hooks/useChat';
-import { useMessages } from '@/hooks/useMessages';
+import { useMessages } from '@/hooks/useMessage';
 import { MessageBubble } from './message-bubble';
 import { MessageInput } from './message-input';
 import { ChatHeader } from './chat-header';
 import { cn } from '@/lib/utils';
+import { MessageSquare } from 'lucide-react';
 
 interface ChatWindowProps {
   chatId?: string;
@@ -88,7 +89,7 @@ export function ChatWindow({ chatId, onBack }: ChatWindowProps) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 text-center">
         <div className="h-16 w-16 bg-muted rounded-full flex items-center justify-center mb-4">
-          <MessageBubble className="h-8 w-8 text-muted-foreground" />
+          <MessageSquare className="h-8 w-8 text-muted-foreground" />
         </div>
         <h3 className="text-xl font-semibold mb-2">No Chat Selected</h3>
         <p className="text-muted-foreground">
@@ -102,7 +103,7 @@ export function ChatWindow({ chatId, onBack }: ChatWindowProps) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 text-center">
         <div className="h-16 w-16 bg-destructive/10 rounded-full flex items-center justify-center mb-4">
-          <MessageBubble className="h-8 w-8 text-destructive" />
+          <MessageSquare className="h-8 w-8 text-destructive" />
         </div>
         <h3 className="text-xl font-semibold mb-2">Chat Not Found</h3>
         <p className="text-muted-foreground">
@@ -163,13 +164,15 @@ export function ChatWindow({ chatId, onBack }: ChatWindowProps) {
         )}
 
         <div className="space-y-4">
-          {messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isSelected={selectedMessage?.id === message.id}
-            />
-          ))}
+         {messages.map((message) => (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            chatType={currentChat!.chat_type} // ✅ ADD THIS
+            isSelected={selectedMessage?.id === message.id}
+          />
+        ))}
+
         </div>
 
         {/* Typing indicator */}
