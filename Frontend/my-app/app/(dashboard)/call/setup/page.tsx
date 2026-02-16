@@ -2,539 +2,640 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { AudioIndicator } from '@/components/calls/AudioIndicator';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@radix-ui/react-switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@radix-ui/react-select';
-import { Slider } from '@radix-ui/react-slider';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@radix-ui/react-tabs';
-import { useMedia } from '@/hooks/useMedia';
+import { useAuth } from '@/hooks/useAuth';
 import { useCall } from '@/hooks/useCall';
-import { Video, Mic, Phone, Settings, Check, AlertCircle, Volume2, Headphones, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { MainLayout } from '@/components/layout/main-layout';
+import { useMediaQuery } from '@/hooks/use-media-query';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+// import { Slider } from '@/components/ui/slider';
+import { Slider } from '@radix-ui/react-slider';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import {
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  Monitor,
+  Camera,
+  Volume2,
+  Settings,
+  Check,
+  AlertCircle,
+  Loader2,
+  ArrowLeft,
+  Phone,
+  PhoneOff,
+  Radio
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export default function CallSetupPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const chatId = searchParams.get('chatId');
-  const contactId = searchParams.get('contactId');
+  const chatId = searchParams.get('chat');
   const callType = searchParams.get('type') as 'audio' | 'video' || 'audio';
-
-  const [selectedCallType, setSelectedCallType] = useState<'audio' | 'video'>(callType);
-  const [audioLevel, setAudioLevel] = useState(0);
-  const [videoTestActive, setVideoTestActive] = useState(true);
-  const [audioTestActive, setAudioTestActive] = useState(true);
-  const [noiseSuppression, setNoiseSuppression] = useState(true);
-  const [echoCancellation, setEchoCancellation] = useState(true);
-  const [audioVolume, setAudioVolume] = useState([80]);
-  const [isTestingAudio, setIsTestingAudio] = useState(false);
-  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
-  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const animationRef = useRef<number | null>(null);
-
-  const {
-    stream,
-    audioEnabled,
-    videoEnabled,
-    devices,
-    selectedAudioDevice,
-    selectedVideoDevice,
-    isLoading,
-    toggleAudio,
-    toggleVideo,
-    switchCamera,
-    switchMicrophone,
-    refreshDevices,
-  } = useMedia({ audio: true, video: true });
-
+  
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { initiateCall } = useCall();
+  const isMobile = useMediaQuery('(max-width: 768px)');
+  
+  const [step, setStep] = useState<'permissions' | 'devices' | 'preview'>('permissions');
+  const [hasPermissions, setHasPermissions] = useState(false);
+  const [isRequestingPermissions, setIsRequestingPermissions] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [hasVideo, setHasVideo] = useState(callType === 'video');
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [volume, setVolume] = useState(100);
+  const [selectedCamera, setSelectedCamera] = useState<string>('');
+  const [selectedMicrophone, setSelectedMicrophone] = useState<string>('');
+  const [selectedSpeaker, setSelectedSpeaker] = useState<string>('');
+  
+  const [devices, setDevices] = useState<{
+    cameras: MediaDeviceInfo[];
+    microphones: MediaDeviceInfo[];
+    speakers: MediaDeviceInfo[];
+  }>({
+    cameras: [],
+    microphones: [],
+    speakers: []
+  });
 
-  const audioDevices = devices.filter(d => d.kind === 'audioinput');
-  const videoDevices = devices.filter(d => d.kind === 'videoinput');
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const screenVideoRef = useRef<HTMLVideoElement>(null);
 
-  // Setup audio analysis for microphone testing
+  // Check authentication
   useEffect(() => {
-    if (audioTestActive && stream && stream.getAudioTracks().length > 0) {
-      const setupAudioAnalysis = async () => {
-        try {
-          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          const analyserNode = ctx.createAnalyser();
-          const source = ctx.createMediaStreamSource(stream);
-          
-          analyserNode.fftSize = 256;
-          analyserNode.smoothingTimeConstant = 0.8;
-          source.connect(analyserNode);
-          
-          setAudioContext(ctx);
-          setAnalyser(analyserNode);
-          
-          const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
-          
-          const updateAudioLevel = () => {
-            if (!analyser) return;
-            
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
-            }
-            const average = sum / dataArray.length;
-            setAudioLevel(Math.min(average / 255, 1));
-            
-            animationRef.current = requestAnimationFrame(updateAudioLevel);
-          };
-          
-          animationRef.current = requestAnimationFrame(updateAudioLevel);
-        } catch (err) {
-          console.error('Audio analysis error:', err);
-        }
-      };
-      
-      setupAudioAnalysis();
+    if (!authLoading && !isAuthenticated) {
+      router.push('/login');
     }
-    
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-      if (audioContext) {
-        audioContext.close();
-      }
-    };
-  }, [audioTestActive, stream]);
+  }, [isAuthenticated, authLoading, router]);
 
+  // Request permissions and enumerate devices
+  const requestPermissions = async () => {
+    setIsRequestingPermissions(true);
+    setPermissionError(null);
+
+    try {
+      const constraints = {
+        audio: true,
+        video: callType === 'video'
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setLocalStream(stream);
+      setHasPermissions(true);
+      setStep('devices');
+
+      // Enumerate devices
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setDevices({
+        cameras: devices.filter(d => d.kind === 'videoinput'),
+        microphones: devices.filter(d => d.kind === 'audioinput'),
+        speakers: devices.filter(d => d.kind === 'audiooutput')
+      });
+
+      // Set default devices
+      if (devices.find(d => d.kind === 'videoinput')) {
+        setSelectedCamera(devices.find(d => d.kind === 'videoinput')?.deviceId || '');
+      }
+      if (devices.find(d => d.kind === 'audioinput')) {
+        setSelectedMicrophone(devices.find(d => d.kind === 'audioinput')?.deviceId || '');
+      }
+      if (devices.find(d => d.kind === 'audiooutput')) {
+        setSelectedSpeaker(devices.find(d => d.kind === 'audiooutput')?.deviceId || '');
+      }
+
+    } catch (error: any) {
+      console.error('Permission error:', error);
+      setPermissionError(error.message || 'Failed to get camera/microphone permissions');
+      setHasPermissions(false);
+    } finally {
+      setIsRequestingPermissions(false);
+    }
+  };
+
+  // Set video stream to video element
+  useEffect(() => {
+    if (videoRef.current && localStream) {
+      videoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  // Handle screen share preview
+  const startScreenShare = async () => {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
+
+      if (screenVideoRef.current) {
+        screenVideoRef.current.srcObject = screenStream;
+      }
+
+      setIsScreenSharing(true);
+    } catch (error) {
+      console.error('Screen share failed:', error);
+    }
+  };
+
+  const stopScreenShare = () => {
+    if (screenVideoRef.current?.srcObject) {
+      const tracks = (screenVideoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach(track => track.stop());
+      screenVideoRef.current.srcObject = null;
+    }
+    setIsScreenSharing(false);
+  };
+
+  // Toggle audio/video
+  const toggleMute = () => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => {
+        track.enabled = isMuted;
+      });
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStream && callType === 'video') {
+      localStream.getVideoTracks().forEach(track => {
+        track.enabled = !hasVideo;
+      });
+      setHasVideo(!hasVideo);
+    }
+  };
+
+  // Switch camera
+  const switchCamera = async (deviceId: string) => {
+    if (!localStream || callType !== 'video') return;
+
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: selectedMicrophone ? { exact: selectedMicrophone } : undefined },
+        video: { deviceId: { exact: deviceId } }
+      });
+
+      // Replace tracks
+      const videoTrack = newStream.getVideoTracks()[0];
+      const oldVideoTrack = localStream.getVideoTracks()[0];
+      
+      localStream.removeTrack(oldVideoTrack);
+      localStream.addTrack(videoTrack);
+      oldVideoTrack.stop();
+
+      setSelectedCamera(deviceId);
+    } catch (error) {
+      console.error('Failed to switch camera:', error);
+    }
+  };
+
+  // Start call
   const handleStartCall = async () => {
-    if (!chatId && !contactId) {
-      router.back();
+    if (!chatId) {
+      router.push('/chat');
       return;
     }
 
     try {
-      setError(null);
-      const call = await initiateCall(
-        chatId || contactId || '',
-        selectedCallType
-      );
+      const call = await initiateCall(chatId, callType);
       router.push(`/call/${call.id}`);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to start call:', error);
-      setError(error.message || 'Failed to start call. Please try again.');
     }
   };
 
-  const handleDeviceChange = async (type: 'audio' | 'video', deviceId: string) => {
-    try {
-      setError(null);
-      if (type === 'audio') {
-        await switchMicrophone(deviceId);
-      } else {
-        await switchCamera(deviceId);
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
       }
-      await refreshDevices();
-    } catch (error: any) {
-      console.error('Failed to switch device:', error);
-      setError(`Failed to switch ${type}: ${error.message}`);
-    }
-  };
+      if (screenVideoRef.current?.srcObject) {
+        const tracks = (screenVideoRef.current.srcObject as MediaStream).getTracks();
+        tracks.forEach(track => track.stop());
+      }
+    };
+  }, [localStream]);
 
-  const testAudioOutput = () => {
-    if (audioRef.current) {
-      audioRef.current.play().catch(console.error);
-      setIsTestingAudio(true);
-      setTimeout(() => setIsTestingAudio(false), 2000);
-    }
-  };
+  if (authLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <MainLayout>
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Prepare for Call</h1>
-          <p className="text-muted-foreground">
-            Configure your audio and video settings before starting
-          </p>
+    <div className="min-h-screen bg-gradient-to-b from-background to-muted/20">
+      <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <Button
+            variant="ghost"
+            onClick={() => router.back()}
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <Badge variant="outline" className="text-lg">
+            {callType === 'video' ? '📹 Video Call' : '🎤 Audio Call'} Setup
+          </Badge>
+          <div className="w-20" /> {/* Spacer */}
         </div>
 
-        {error && (
-          <Alert variant="destructive" className="mb-6">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Preview panel */}
-          <div className="lg:col-span-2">
-            <Card className="h-full">
-              <CardHeader>
-                <CardTitle>Preview</CardTitle>
-                <CardDescription>
-                  How you'll appear to others in the call
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="relative aspect-video bg-gradient-to-br from-muted/30 to-muted/10 rounded-lg overflow-hidden border">
-                  {videoEnabled && stream ? (
-                    <video
-                      ref={el => {
-                        if (el && stream) {
-                          el.srcObject = stream;
-                          el.onloadedmetadata = () => el.play();
-                        }
-                      }}
-                      autoPlay
-                      muted
-                      playsInline
-                      className="w-full h-full object-cover"
-                    />
+        <div className="max-w-4xl mx-auto">
+          {/* Progress steps */}
+          <div className="flex items-center justify-center mb-8">
+            {['permissions', 'devices', 'preview'].map((s, index) => (
+              <div key={s} className="flex items-center">
+                <div className={cn(
+                  "h-8 w-8 rounded-full flex items-center justify-center text-sm",
+                  step === s 
+                    ? "bg-primary text-primary-foreground" 
+                    : ['permissions', 'devices', 'preview'].indexOf(step) > index
+                    ? "bg-green-500 text-white"
+                    : "bg-muted text-muted-foreground"
+                )}>
+                  {['permissions', 'devices', 'preview'].indexOf(step) > index ? (
+                    <Check className="h-4 w-4" />
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full p-8">
-                      <div className="h-24 w-24 rounded-full bg-muted flex items-center justify-center mb-4">
-                        <Video className="h-12 w-12 text-muted-foreground" />
-                      </div>
-                      <p className="text-muted-foreground">Camera is off</p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Turn on camera to preview
-                      </p>
-                    </div>
+                    index + 1
                   )}
+                </div>
+                {index < 2 && (
+                  <div className={cn(
+                    "h-1 w-16 mx-2",
+                    ['permissions', 'devices', 'preview'].indexOf(step) > index
+                      ? "bg-green-500"
+                      : "bg-muted"
+                  )} />
+                )}
+              </div>
+            ))}
+          </div>
 
-                  {/* Audio level indicator */}
-                  {stream && (
-                    <div className="absolute bottom-4 right-4">
-                      <AudioIndicator
-                        stream={stream}
-                        isSpeaking={audioLevel > 0.05}
-                        level={audioLevel}
-                        size="md"
-                        showLevel
-                      />
-                    </div>
+          {/* Permissions step */}
+          {step === 'permissions' && (
+            <Card className="p-8 text-center">
+              <div className="max-w-md mx-auto space-y-6">
+                <div className="h-20 w-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+                  {callType === 'video' ? (
+                    <Camera className="h-10 w-10 text-primary" />
+                  ) : (
+                    <Mic className="h-10 w-10 text-primary" />
                   )}
+                </div>
+                
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-bold">
+                    {callType === 'video' ? 'Camera & Microphone Access' : 'Microphone Access'}
+                  </h2>
+                  <p className="text-muted-foreground">
+                    We need access to your {callType === 'video' ? 'camera and microphone' : 'microphone'} to start the call.
+                    This is required for a {callType} call.
+                  </p>
+                </div>
 
-                  {/* Camera status */}
-                  <div className="absolute top-4 left-4 flex flex-col space-y-2">
+                {permissionError && (
+                  <div className="bg-destructive/10 text-destructive p-4 rounded-lg flex items-start space-x-3">
+                    <AlertCircle className="h-5 w-5 mt-0.5" />
+                    <div className="text-left">
+                      <p className="font-medium">Permission Error</p>
+                      <p className="text-sm">{permissionError}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <Button
+                    size="lg"
+                    onClick={requestPermissions}
+                    disabled={isRequestingPermissions}
+                    className="w-full"
+                  >
+                    {isRequestingPermissions ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Requesting...
+                      </>
+                    ) : (
+                      'Allow Access'
+                    )}
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    onClick={() => router.back()}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+
+                <div className="text-sm text-muted-foreground">
+                  <p>You can change these settings anytime during the call.</p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Devices step */}
+          {step === 'devices' && (
+            <Card className="p-6">
+              <h2 className="text-xl font-semibold mb-6">Configure Your Devices</h2>
+              
+              <div className="space-y-6">
+                {/* Cameras */}
+                {callType === 'video' && devices.cameras.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-base">Camera</Label>
+                    <div className="grid gap-2">
+                      {devices.cameras.map((camera) => (
+                        <Button
+                          key={camera.deviceId}
+                          variant={selectedCamera === camera.deviceId ? "default" : "outline"}
+                          className="justify-start"
+                          onClick={() => switchCamera(camera.deviceId)}
+                        >
+                          <Camera className="h-4 w-4 mr-2" />
+                          {camera.label || `Camera ${camera.deviceId.slice(0, 5)}`}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Microphones */}
+                {devices.microphones.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-base">Microphone</Label>
+                    <div className="grid gap-2">
+                      {devices.microphones.map((mic) => (
+                        <Button
+                          key={mic.deviceId}
+                          variant={selectedMicrophone === mic.deviceId ? "default" : "outline"}
+                          className="justify-start"
+                          onClick={() => setSelectedMicrophone(mic.deviceId)}
+                        >
+                          <Mic className="h-4 w-4 mr-2" />
+                          {mic.label || `Microphone ${mic.deviceId.slice(0, 5)}`}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Speakers */}
+                {devices.speakers.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-base">Speaker</Label>
+                    <div className="grid gap-2">
+                      {devices.speakers.map((speaker) => (
+                        <Button
+                          key={speaker.deviceId}
+                          variant={selectedSpeaker === speaker.deviceId ? "default" : "outline"}
+                          className="justify-start"
+                          onClick={() => setSelectedSpeaker(speaker.deviceId)}
+                        >
+                          <Volume2 className="h-4 w-4 mr-2" />
+                          {speaker.label || `Speaker ${speaker.deviceId.slice(0, 5)}`}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Volume slider */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base">Microphone Volume</Label>
+                    <span className="text-sm text-muted-foreground">{volume}%</span>
+                  </div>
+                  <Slider
+                    value={[volume]}
+                    onValueChange={([v]: [number]) => setVolume(v)}
+                    max={100}
+                    step={1}
+                  />
+                </div>
+
+                <Separator />
+
+                {/* Test controls */}
+                <div className="flex items-center space-x-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={toggleMute}
+                  >
+                    {isMuted ? (
+                      <>
+                        <MicOff className="h-4 w-4 mr-2" />
+                        Unmute
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="h-4 w-4 mr-2" />
+                        Mute
+                      </>
+                    )}
+                  </Button>
+
+                  {callType === 'video' && (
                     <Button
-                      variant="secondary"
+                      variant="outline"
                       size="sm"
-                      className={cn(
-                        "gap-2",
-                        !videoEnabled && "bg-destructive hover:bg-destructive/90"
-                      )}
                       onClick={toggleVideo}
                     >
-                      <Video className="h-4 w-4" />
-                      {videoEnabled ? 'Camera On' : 'Camera Off'}
-                    </Button>
-                  </div>
-
-                  {/* Mic status */}
-                  <div className="absolute top-4 right-4">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className={cn(
-                        "gap-2",
-                        !audioEnabled && "bg-destructive hover:bg-destructive/90"
-                      )}
-                      onClick={toggleAudio}
-                    >
-                      <Mic className="h-4 w-4" />
-                      {audioEnabled ? 'Mic On' : 'Mic Off'}
-                    </Button>
-                  </div>
-
-                  {/* Call type indicator */}
-                  <div className="absolute bottom-4 left-4">
-                    <Badge variant="secondary" className="gap-1">
-                      {selectedCallType === 'video' ? (
+                      {hasVideo ? (
                         <>
-                          <Video className="h-3 w-3" />
-                          Video Call
+                          <Video className="h-4 w-4 mr-2" />
+                          Stop Video
                         </>
                       ) : (
                         <>
-                          <Mic className="h-3 w-3" />
-                          Audio Call
+                          <VideoOff className="h-4 w-4 mr-2" />
+                          Start Video
                         </>
                       )}
-                    </Badge>
-                  </div>
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+                  >
+                    {isScreenSharing ? (
+                      <>
+                        <Monitor className="h-4 w-4 mr-2" />
+                        Stop Sharing
+                      </>
+                    ) : (
+                      <>
+                        <Monitor className="h-4 w-4 mr-2" />
+                        Test Screen Share
+                      </>
+                    )}
+                  </Button>
                 </div>
-              </CardContent>
-              <CardFooter className="border-t pt-4">
-                <div className="w-full">
-                  <Tabs defaultValue="audio" className="w-full">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="audio">Audio Settings</TabsTrigger>
-                      <TabsTrigger value="video">Video Settings</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="audio" className="space-y-4 pt-4">
-                      <div className="space-y-2">
-                        <Label>Microphone Level</Label>
-                        <div className="h-2 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-green-500 transition-all duration-100"
-                            style={{ width: `${audioLevel * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-between space-x-4">
-                        <div className="flex-1">
-                          <Label>Output Volume</Label>
-                          <Slider
-                            value={audioVolume}
-                            onValueChange={setAudioVolume}
-                            max={100}
-                            step={1}
-                            className="mt-2"
-                          />
-                        </div>
-                        <Button variant="outline" size="sm" onClick={testAudioOutput}>
-                          <Volume2 className="h-4 w-4 mr-2" />
-                          Test
-                        </Button>
-                      </div>
-                    </TabsContent>
-                    <TabsContent value="video" className="space-y-4 pt-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Brightness</Label>
-                          <Slider defaultValue={[50]} max={100} step={1} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Contrast</Label>
-                          <Slider defaultValue={[50]} max={100} step={1} />
-                        </div>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
+
+                <div className="flex justify-end space-x-4 pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => setStep('permissions')}
+                  >
+                    Back
+                  </Button>
+                  <Button onClick={() => setStep('preview')}>
+                    Continue to Preview
+                  </Button>
                 </div>
-              </CardFooter>
+              </div>
             </Card>
-          </div>
+          )}
 
-          {/* Settings panel */}
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Call Settings</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <Label>Call Type</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant={selectedCallType === 'audio' ? 'default' : 'outline'}
-                      onClick={() => setSelectedCallType('audio')}
-                      className="h-auto py-4 flex-col"
-                    >
-                      <div className="flex flex-col items-center">
-                        <Mic className="h-6 w-6 mb-2" />
-                        <span>Audio Call</span>
-                        <span className="text-xs text-muted-foreground mt-1">
-                          Voice only
-                        </span>
-                      </div>
-                    </Button>
-                    <Button
-                      variant={selectedCallType === 'video' ? 'default' : 'outline'}
-                      onClick={() => setSelectedCallType('video')}
-                      className="h-auto py-4 flex-col"
-                    >
-                      <div className="flex flex-col items-center">
-                        <Video className="h-6 w-6 mb-2" />
-                        <span>Video Call</span>
-                        <span className="text-xs text-muted-foreground mt-1">
-                          With camera
-                        </span>
-                      </div>
-                    </Button>
-                  </div>
-                </div>
+          {/* Preview step */}
+          {step === 'preview' && (
+            <Card className="p-6">
+              <h2 className="text-xl font-semibold mb-6">Preview & Join</h2>
 
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* Preview area */}
                 <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="microphone">Microphone</Label>
+                  <div className="relative aspect-video bg-muted rounded-lg overflow-hidden">
+                    {hasVideo && callType === 'video' ? (
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Avatar className="h-20 w-20">
+                          <AvatarImage src={user?.profile_image || ''} />
+                          <AvatarFallback>
+                            {user?.username?.charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                    )}
+
+                    {/* Preview controls */}
+                    <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-2">
                       <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => refreshDevices()}
+                        size="icon"
+                        variant={isMuted ? "destructive" : "secondary"}
+                        onClick={toggleMute}
                       >
-                        Refresh
+                        {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                       </Button>
+                      
+                      {callType === 'video' && (
+                        <Button
+                          size="icon"
+                          variant={hasVideo ? "secondary" : "destructive"}
+                          onClick={toggleVideo}
+                        >
+                          {hasVideo ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
+                        </Button>
+                      )}
                     </div>
-                    <Select
-                      value={selectedAudioDevice || undefined}
-                      onValueChange={(value:string) => handleDeviceChange('audio', value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select microphone" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {audioDevices.length > 0 ? (
-                          audioDevices.map((device) => (
-                            <SelectItem key={device.deviceId} value={device.deviceId}>
-                              {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="none" disabled>
-                            No microphones found
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
                   </div>
 
-                  {selectedCallType === 'video' && (
-                    <div className="space-y-2">
-                      <Label>Camera</Label>
-                      <Select
-                        value={selectedVideoDevice || undefined}
-                        onValueChange={(value:string) => handleDeviceChange('video', value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select camera" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {videoDevices.length > 0 ? (
-                            videoDevices.map((device) => (
-                              <SelectItem key={device.deviceId} value={device.deviceId}>
-                                {device.label || `Camera ${device.deviceId.slice(0, 8)}`}
-                              </SelectItem>
-                            ))
-                          ) : (
-                            <SelectItem value="none" disabled>
-                              No cameras found
-                            </SelectItem>
-                          )}
-                        </SelectContent>
-                      </Select>
+                  {/* Screen share preview */}
+                  {isScreenSharing && (
+                    <div className="relative aspect-video bg-muted rounded-lg overflow-hidden">
+                      <video
+                        ref={screenVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-4 border-t pt-4">
-                  <h4 className="text-sm font-medium">Audio Enhancements</h4>
+                {/* Call info */}
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <h3 className="font-semibold">Call Details</h3>
+                    <p className="text-sm text-muted-foreground">
+                      You're about to start a {callType} call. Make sure everything looks good before joining.
+                    </p>
+                  </div>
+
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="noise-suppression">Noise Suppression</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Reduce background noise
-                        </p>
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <span className="text-sm">Microphone</span>
+                      <div className="flex items-center space-x-2">
+                        {isMuted ? (
+                          <Badge variant="destructive">Muted</Badge>
+                        ) : (
+                          <Badge variant="default" className="bg-green-500">Active</Badge>
+                        )}
                       </div>
-                      <Switch
-                        id="noise-suppression"
-                        checked={noiseSuppression}
-                        onCheckedChange={setNoiseSuppression}
-                      />
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="echo-cancellation">Echo Cancellation</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Remove echo from audio
-                        </p>
+
+                    {callType === 'video' && (
+                      <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                        <span className="text-sm">Camera</span>
+                        <div className="flex items-center space-x-2">
+                          {hasVideo ? (
+                            <Badge variant="default" className="bg-green-500">Active</Badge>
+                          ) : (
+                            <Badge variant="destructive">Off</Badge>
+                          )}
+                        </div>
                       </div>
-                      <Switch
-                        id="echo-cancellation"
-                        checked={echoCancellation}
-                        onCheckedChange={setEchoCancellation}
-                      />
+                    )}
+
+                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <span className="text-sm">Connection</span>
+                      <Badge variant="outline" className="text-green-500">
+                        <Radio className="h-3 w-3 mr-1 animate-pulse" />
+                        Ready
+                      </Badge>
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
 
-            {/* Audio test */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Audio Test</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Test Microphone</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Speak to check your microphone
-                      </p>
-                    </div>
-                    <Switch
-                      checked={audioTestActive}
-                      onCheckedChange={setAudioTestActive}
-                    />
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <Button
+                      size="lg"
+                      onClick={handleStartCall}
+                      className="w-full"
+                    >
+                      <Phone className="h-4 w-4 mr-2" />
+                      Start Call
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      onClick={() => setStep('devices')}
+                      className="w-full"
+                    >
+                      <Settings className="h-4 w-4 mr-2" />
+                      Adjust Settings
+                    </Button>
                   </div>
-                  
-                  {audioTestActive && (
-                    <div className="space-y-3">
-                      <div className="h-2 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-green-500 transition-all duration-100"
-                          style={{ width: `${audioLevel * 100}%` }}
-                        />
-                      </div>
-                      <div className="flex items-center justify-center space-x-2 text-xs">
-                        <div className="flex items-center">
-                          <div className="h-2 w-2 rounded-full bg-green-500 mr-1"></div>
-                          <span>Good</span>
-                        </div>
-                        <div className="flex items-center">
-                          <div className="h-2 w-2 rounded-full bg-yellow-500 mr-1"></div>
-                          <span>Fair</span>
-                        </div>
-                        <div className="flex items-center">
-                          <div className="h-2 w-2 rounded-full bg-red-500 mr-1"></div>
-                          <span>Poor</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
-              </CardContent>
+              </div>
             </Card>
-
-            {/* Start call button */}
-            <Button
-              size="lg"
-              className="w-full"
-              onClick={handleStartCall}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Preparing...
-                </>
-              ) : (
-                <>
-                  <Phone className="mr-2 h-5 w-5" />
-                  Start {selectedCallType === 'video' ? 'Video' : 'Audio'} Call
-                </>
-              )}
-            </Button>
-
-            {/* Hidden audio element for output test */}
-            <audio ref={audioRef} className="hidden">
-              <source src="/audio/test-tone.mp3" type="audio/mpeg" />
-              Your browser does not support the audio element.
-            </audio>
-          </div>
+          )}
         </div>
       </div>
-    </MainLayout>
+    </div>
   );
 }

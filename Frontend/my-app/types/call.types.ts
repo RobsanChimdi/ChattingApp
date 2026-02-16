@@ -25,6 +25,7 @@ export interface CallParticipant {
   user: User;
   role: 'initiator' | 'participant';
   joined_at: string;
+  is_speaking: boolean;
   left_at?: string;
   is_muted: boolean;
   has_video: boolean;
