@@ -4,11 +4,13 @@ import type { Call, CallCreateData, CallParticipant } from '@/types/call.types';
 export const callService = {
   // Call management
   async createCall(data: CallCreateData): Promise<Call> {
-    return api.post<Call>('/calls/create/', data);
+    const response = await api.post<Call>('/calls/create/', data);
+    return response.data;
   },
 
   async joinCall(callId: string): Promise<CallParticipant> {
-    return api.post<CallParticipant>(`/calls/${callId}/join/`);
+    const response = await api.post<CallParticipant>(`/calls/${callId}/join/`);
+    return response.data;
   },
 
   async leaveCall(callId: string): Promise<void> {
@@ -16,29 +18,35 @@ export const callService = {
   },
 
   async endCall(callId: string): Promise<Call> {
-    return api.post<Call>(`/calls/${callId}/end/`);
+    const response = await api.post<Call>(`/calls/${callId}/end/`);
+    return response.data;
   },
 
   // Call controls
   async toggleMute(callId: string): Promise<CallParticipant> {
-    return api.post<CallParticipant>(`/calls/${callId}/toggle-mute/`);
+    const response = await api.post<CallParticipant>(`/calls/${callId}/toggle-mute/`);
+    return response.data;
   },
 
   async toggleVideo(callId: string): Promise<CallParticipant> {
-    return api.post<CallParticipant>(`/calls/${callId}/toggle-video/`);
+    const response = await api.post<CallParticipant>(`/calls/${callId}/toggle-video/`);
+    return response.data;
   },
 
   // Call info
   async getCall(callId: string): Promise<Call> {
-    return api.get<Call>(`/calls/${callId}/`);
+    const response = await api.get<Call>(`/calls/${callId}/`);
+    return response.data;
   },
 
   async getCallParticipants(callId: string): Promise<CallParticipant[]> {
-    return api.get<CallParticipant[]>(`/calls/${callId}/participants/`);
+    const response = await api.get<CallParticipant[]>(`/calls/${callId}/participants/`);
+    return response.data;
   },
 
   async getActiveCalls(): Promise<Call[]> {
-    return api.get<Call[]>('/calls/active/');
+    const response = await api.get<Call[]>('/calls/active/');
+    return response.data;
   },
 
   // Call quality
