@@ -1,730 +1,518 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { useChat } from '@/hooks/useChat';
 import { useCall } from '@/hooks/useCall';
+import { useSocket } from '@/hooks/useSocket';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   MessageSquare,
   Phone,
   Video,
   Users,
   Clock,
-  CheckCheck,
-  ChevronRight,
-  Loader2,
-  Calendar,
-  TrendingUp,
-  UserPlus,
+  ArrowRight,
+  PhoneOff,
   PhoneIncoming,
   PhoneOutgoing,
-  PhoneMissed,
-  Mic,
-  MicOff,
-  VideoOff,
+  Radio,
+  Wifi,
+  WifiOff,
+  Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatDistanceToNow, format } from 'date-fns';
+
+interface RecentChat {
+  id: string;
+  name: string;
+  avatar?: string;
+  lastMessage?: string;
+  lastMessageTime?: string;
+  unreadCount: number;
+  type: 'direct' | 'group';
+}
+
+interface RecentCall {
+  id: string;
+  with: {
+    id: string;
+    name: string;
+    avatar?: string;
+  };
+  type: 'audio' | 'video';
+  direction: 'incoming' | 'outgoing' | 'missed';
+  duration?: number;
+  timestamp: string;
+}
 
 export default function DashboardPage() {
-  const { user } = useAuth();
-  const { chats, fetchChats, isLoading: chatsLoading } = useChat();
+  const router = useRouter();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isConnected } = useSocket();
+  const { chats, fetchChats } = useChat();
   const { activeCall } = useCall();
   
-  const [recentChats, setRecentChats] = useState<any[]>([]);
-  const [recentCalls, setRecentCalls] = useState<any[]>([]);
+  const [recentChats, setRecentChats] = useState<RecentChat[]>([]);
+  const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState({
     totalChats: 0,
-    unreadMessages: 0,
     totalCalls: 0,
-    missedCalls: 0,
-    onlineFriends: 0,
-    activeCalls: 0,
+    unreadMessages: 0,
+    onlineContacts: 0
   });
 
-  // Fetch chats and calculate stats
+  // Check authentication
   useEffect(() => {
-    fetchChats().then((fetchedChats) => {
-      // Calculate stats
-      const totalUnread = fetchedChats.reduce(
-        (sum: number, chat: any) => sum + (chat.unread_count || 0), 
-        0
-      );
-      
-      const onlineCount = fetchedChats.filter((chat: any) => 
-        chat.chat_type === 'private' && 
-        chat.participants?.some((p: any) => p.is_online && p.id !== user?.id)
-      ).length;
+    if (!authLoading && !isAuthenticated) {
+      router.push('/login');
+    }
+  }, [isAuthenticated, authLoading, router]);
 
+  // Load dashboard data
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadDashboardData();
+    }
+  }, [isAuthenticated]);
+
+  const loadDashboardData = async () => {
+    setIsLoading(true);
+    try {
+      // Fetch chats
+      const chatsData = await fetchChats();
+      
+      // Process recent chats
+      const processedChats: RecentChat[] = chatsData.slice(0, 5).map((chat: any) => ({
+        id: chat.id,
+        name: chat.name || chat.participants?.[0]?.username || 'Unknown',
+        avatar: chat.avatar || chat.participants?.[0]?.profile_image,
+        lastMessage: chat.last_message?.content,
+        lastMessageTime: chat.last_message?.created_at,
+        unreadCount: chat.unread_count || 0,
+        type: chat.type
+      }));
+
+      setRecentChats(processedChats);
+
+      // Mock recent calls data (replace with actual API call)
+      const mockCalls: RecentCall[] = [
+        {
+          id: '1',
+          with: {
+            id: '2',
+            name: 'John Doe',
+            avatar: '/avatars/john.jpg'
+          },
+          type: 'video',
+          direction: 'outgoing',
+          duration: 125,
+          timestamp: new Date(Date.now() - 3600000).toISOString()
+        },
+        {
+          id: '2',
+          with: {
+            id: '3',
+            name: 'Jane Smith',
+            avatar: '/avatars/jane.jpg'
+          },
+          type: 'audio',
+          direction: 'incoming',
+          duration: 320,
+          timestamp: new Date(Date.now() - 86400000).toISOString()
+        },
+        {
+          id: '3',
+          with: {
+            id: '4',
+            name: 'Mike Johnson',
+            avatar: '/avatars/mike.jpg'
+          },
+          type: 'video',
+          direction: 'missed',
+          timestamp: new Date(Date.now() - 172800000).toISOString()
+        }
+      ];
+
+      setRecentCalls(mockCalls);
+
+      // Calculate stats
       setStats({
-        totalChats: fetchedChats.length,
-        unreadMessages: totalUnread,
-        totalCalls: 0, // This would come from call store
-        missedCalls: 0, // This would come from call store
-        onlineFriends: onlineCount,
-        activeCalls: activeCall ? 1 : 0,
+        totalChats: chatsData.length,
+        totalCalls: 42, // Mock data
+        unreadMessages: processedChats.reduce((acc, chat) => acc + chat.unreadCount, 0),
+        onlineContacts: 8 // Mock data
       });
 
-      // Get recent chats (last 5)
-      setRecentChats(
-        fetchedChats
-          .sort((a: any, b: any) => 
-            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-          )
-          .slice(0, 5)
-      );
-    });
-
-    // Fetch recent calls
-    // This would come from your call store/service
-    setRecentCalls([
-      {
-        id: '1',
-        with: { id: '2', username: 'John Doe', profile_image: '' },
-        type: 'video',
-        direction: 'outgoing',
-        status: 'completed',
-        duration: 125,
-        started_at: new Date(Date.now() - 3600000).toISOString(),
-      },
-      {
-        id: '2',
-        with: { id: '3', username: 'Jane Smith', profile_image: '' },
-        type: 'audio',
-        direction: 'incoming',
-        status: 'missed',
-        duration: 0,
-        started_at: new Date(Date.now() - 7200000).toISOString(),
-      },
-      {
-        id: '3',
-        with: { id: '4', username: 'Mike Johnson', profile_image: '' },
-        type: 'video',
-        direction: 'incoming',
-        status: 'completed',
-        duration: 320,
-        started_at: new Date(Date.now() - 86400000).toISOString(),
-      },
-    ]);
-  }, [fetchChats, user?.id, activeCall]);
-
-  const getChatName = (chat: any) => {
-    if (chat.chat_type === 'private') {
-      const otherUser = chat.participants?.find((p: any) => p.id !== user?.id);
-      return otherUser?.username || 'Unknown User';
-    }
-    return chat.name || 'Group Chat';
-  };
-
-  const getChatAvatar = (chat: any) => {
-    if (chat.chat_type === 'private') {
-      const otherUser = chat.participants?.find((p: any) => p.id !== user?.id);
-      return otherUser?.profile_image;
-    }
-    return chat.avatar;
-  };
-
-  const getLastMessagePreview = (chat: any) => {
-    if (!chat.last_message) return 'No messages yet';
-    
-    const sender = chat.last_message.sender?.id === user?.id ? 'You: ' : '';
-    const text = chat.last_message.text || 
-      (chat.last_message.message_type === 'image' ? '📷 Photo' : 
-       chat.last_message.message_type === 'video' ? '🎥 Video' : 
-       chat.last_message.message_type === 'file' ? '📄 File' : 
-       chat.last_message.message_type === 'audio' ? '🎵 Audio' : '');
-    
-    return sender + text;
-  };
-
-  const getCallIcon = (call: any) => {
-    switch (call.type) {
-      case 'video':
-        return Video;
-      case 'audio':
-        return Phone;
-      default:
-        return Phone;
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const getCallStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return 'text-green-500';
-      case 'missed':
-        return 'text-destructive';
-      case 'rejected':
-        return 'text-destructive';
-      default:
-        return 'text-muted-foreground';
+  // Format timestamp
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+    if (days === 0) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else if (days === 1) {
+      return 'Yesterday';
+    } else if (days < 7) {
+      return date.toLocaleDateString([], { weekday: 'short' });
+    } else {
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
     }
   };
 
-  const getCallDirectionIcon = (direction: string) => {
-    switch (direction) {
-      case 'incoming':
-        return PhoneIncoming;
-      case 'outgoing':
-        return PhoneOutgoing;
-      default:
-        return Phone;
-    }
-  };
-
-  const formatDuration = (seconds: number) => {
-    if (seconds < 60) return `${seconds}s`;
+  // Format duration
+  const formatDuration = (seconds?: number) => {
+    if (!seconds) return '';
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Get call icon and color
+  const getCallDisplay = (call: RecentCall) => {
+    switch (call.direction) {
+      case 'incoming':
+        return { icon: PhoneIncoming, color: 'text-green-500' };
+      case 'outgoing':
+        return { icon: PhoneOutgoing, color: 'text-blue-500' };
+      case 'missed':
+        return { icon: PhoneOff, color: 'text-red-500' };
+    }
+  };
+
+  if (authLoading || isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+          <p className="text-muted-foreground">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  // If there's an active call, show call banner
+  if (activeCall) {
+    return (
+      <div className="p-6">
+        <Card className="p-8 text-center">
+          <div className="max-w-md mx-auto space-y-6">
+            <div className="h-20 w-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto animate-pulse">
+              <Phone className="h-10 w-10 text-primary" />
+            </div>
+            
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">You're in an active call</h2>
+              <p className="text-muted-foreground">
+                Return to your current call or end it to start a new one.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <Button
+                size="lg"
+                onClick={() => router.push(`/call/${activeCall.id}`)}
+                className="w-full"
+              >
+                <Phone className="h-4 w-4 mr-2" />
+                Return to Call
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => router.push('/chat')}
+                className="w-full"
+              >
+                Go to Chats
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
-    <div className="container mx-auto p-4 md:p-6 space-y-6">
-      {/* Welcome Section */}
+    <div className="p-6 space-y-8">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">
-            Welcome back, {user?.first_name || user?.username}! 👋
-          </h1>
+          <h1 className="text-3xl font-bold">Welcome back, {user?.username}!</h1>
           <p className="text-muted-foreground mt-1">
-            {format(new Date(), 'EEEE, MMMM d, yyyy')}
+            Here's what's happening with your calls and messages.
           </p>
         </div>
-        
-        {activeCall && (
-          <Link href={`/call/${activeCall.id}`}>
-            <Button className="bg-green-600 hover:bg-green-700">
-              <Phone className="h-4 w-4 mr-2 animate-pulse" />
-              Return to Active Call
-            </Button>
-          </Link>
-        )}
+
+        <Badge 
+          variant="outline" 
+          className={cn(
+            "px-3 py-1",
+            isConnected ? "text-green-500 border-green-500/20 bg-green-500/10" : "text-red-500 border-red-500/20 bg-red-500/10"
+          )}
+        >
+          {isConnected ? (
+            <>
+              <Wifi className="h-3 w-3 mr-1" />
+              Connected
+            </>
+          ) : (
+            <>
+              <WifiOff className="h-3 w-3 mr-1" />
+              Offline
+            </>
+          )}
+        </Badge>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Chats</CardTitle>
-            <MessageSquare className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalChats}</div>
-            <div className="flex items-center space-x-2">
-              <TrendingUp className="h-3 w-3 text-green-500" />
-              <p className="text-xs text-muted-foreground">
-                {stats.onlineFriends} friends online
-              </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Total Chats</p>
+              <p className="text-2xl font-bold mt-1">{stats.totalChats}</p>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Unread Messages</CardTitle>
-            <CheckCheck className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.unreadMessages}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.unreadMessages > 0 
-                ? `Waiting in ${stats.unreadMessages} chats` 
-                : 'All caught up!'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Calls</CardTitle>
-            <Phone className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalCalls}</div>
-            <div className="flex items-center space-x-2">
-              <Badge variant="destructive" className="text-xs">
-                {stats.missedCalls} missed
-              </Badge>
-              {stats.activeCalls > 0 && (
-                <Badge variant="default" className="bg-green-500 text-xs animate-pulse">
-                  {stats.activeCalls} active
-                </Badge>
-              )}
+            <div className="h-12 w-12 bg-primary/10 rounded-full flex items-center justify-center">
+              <MessageSquare className="h-6 w-6 text-primary" />
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Quick Actions</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="flex space-x-2">
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/chat?new=true">
-                  <MessageSquare className="h-3 w-3 mr-1" />
-                  New Chat
-                </Link>
-              </Button>
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/call/setup?type=video">
-                  <Video className="h-3 w-3 mr-1" />
-                  Call
-                </Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Main Content Tabs */}
-      <Tabs defaultValue="recent" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="recent">Recent Activity</TabsTrigger>
-          <TabsTrigger value="chats">Chats</TabsTrigger>
-          <TabsTrigger value="calls">Calls</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="recent" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Recent Chats */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>Recent Chats</span>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href="/chat">
-                      View all
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Link>
-                  </Button>
-                </CardTitle>
-                <CardDescription>
-                  Your most recent conversations
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {chatsLoading ? (
-                  <div className="flex justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : recentChats.length === 0 ? (
-                  <div className="text-center py-8">
-                    <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                    <h3 className="text-lg font-medium mb-2">No chats yet</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Start a new conversation to get started!
-                    </p>
-                    <Button asChild>
-                      <Link href="/chat?new=true">Start Chatting</Link>
-                    </Button>
-                  </div>
-                ) : (
-                  <ScrollArea className="h-[300px] pr-4">
-                    <div className="space-y-2">
-                      {recentChats.map((chat) => (
-                        <Link
-                          key={chat.id}
-                          href={`/chat/${chat.id}`}
-                          className="block"
-                        >
-                          <div className="flex items-center space-x-4 p-3 rounded-lg transition-colors hover:bg-muted/50">
-                            <div className="relative">
-                              <Avatar className="h-12 w-12">
-                                <AvatarImage src={getChatAvatar(chat)} />
-                                <AvatarFallback>
-                                  {getChatName(chat).charAt(0).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              {chat.chat_type === 'group' && (
-                                <Badge 
-                                  variant="secondary" 
-                                  className="absolute -bottom-1 -right-1 h-5 w-5 p-0 flex items-center justify-center"
-                                >
-                                  <Users className="h-3 w-3" />
-                                </Badge>
-                              )}
-                              {chat.chat_type === 'private' && (
-                                <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full ring-2 ring-background bg-green-500" />
-                              )}
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between">
-                                <h4 className="font-semibold truncate">
-                                  {getChatName(chat)}
-                                </h4>
-                                <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                                  {formatDistanceToNow(new Date(chat.updated_at), { addSuffix: true })}
-                                </span>
-                              </div>
-
-                              <p className="text-sm text-muted-foreground truncate">
-                                {getLastMessagePreview(chat)}
-                              </p>
-
-                              <div className="flex items-center space-x-2 mt-1">
-                                {chat.unread_count > 0 && (
-                                  <Badge variant="default" className="text-xs">
-                                    {chat.unread_count} new
-                                  </Badge>
-                                )}
-                                {chat.last_message?.sender?.id === user?.id && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {chat.last_message?.statuses?.some((s: any) => s.status === 'read') ? (
-                                      <CheckCheck className="h-3 w-3 inline" />
-                                    ) : (
-                                      <CheckCheck className="h-3 w-3 inline opacity-50" />
-                                    )}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </Link>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Recent Calls */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>Recent Calls</span>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href="/calls">
-                      View all
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Link>
-                  </Button>
-                </CardTitle>
-                <CardDescription>
-                  Your call history
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {recentCalls.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Phone className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                    <h3 className="text-lg font-medium mb-2">No calls yet</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Start a call with your contacts
-                    </p>
-                    <Button asChild>
-                      <Link href="/call/setup?type=audio">Start a Call</Link>
-                    </Button>
-                  </div>
-                ) : (
-                  <ScrollArea className="h-[300px] pr-4">
-                    <div className="space-y-2">
-                      {recentCalls.map((call) => {
-                        const CallIcon = getCallIcon(call);
-                        const DirectionIcon = getCallDirectionIcon(call.direction);
-                        
-                        return (
-                          <Link
-                            key={call.id}
-                            href={`/call/${call.id}`}
-                            className="block"
-                          >
-                            <div className="flex items-center space-x-4 p-3 rounded-lg transition-colors hover:bg-muted/50">
-                              <Avatar className="h-10 w-10">
-                                <AvatarImage src={call.with.profile_image} />
-                                <AvatarFallback>
-                                  {call.with.username.charAt(0).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between">
-                                  <h4 className="font-medium truncate">
-                                    {call.with.username}
-                                  </h4>
-                                  <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                                    {formatDistanceToNow(new Date(call.started_at), { addSuffix: true })}
-                                  </span>
-                                </div>
-
-                                <div className="flex items-center space-x-2 mt-1">
-                                  <DirectionIcon className={cn(
-                                    "h-3 w-3",
-                                    getCallStatusColor(call.status)
-                                  )} />
-                                  <CallIcon className="h-3 w-3" />
-                                  <span className="text-xs text-muted-foreground">
-                                    {call.status === 'completed' 
-                                      ? formatDuration(call.duration)
-                                      : call.status.charAt(0).toUpperCase() + call.status.slice(1)
-                                    }
-                                  </span>
-                                  {call.type === 'video' && (
-                                    <Badge variant="outline" className="text-[10px] h-4">
-                                      Video
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
-                )}
-              </CardContent>
-            </Card>
           </div>
-        </TabsContent>
-
-        <TabsContent value="chats">
-          <Card>
-            <CardHeader>
-              <CardTitle>All Chats</CardTitle>
-              <CardDescription>
-                View and manage all your conversations
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {chatsLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : chats.length === 0 ? (
-                <div className="text-center py-8">
-                  <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                  <h3 className="text-lg font-medium mb-2">No chats yet</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Start a new conversation to get started!
-                  </p>
-                  <Button asChild>
-                    <Link href="/chat?new=true">Start Chatting</Link>
-                  </Button>
-                </div>
-              ) : (
-                <ScrollArea className="h-[400px]">
-                  <div className="space-y-2">
-                    {chats.map((chat: any) => (
-                      <Link
-                        key={chat.id}
-                        href={`/chat/${chat.id}`}
-                        className="block"
-                      >
-                        <div className="flex items-center space-x-4 p-3 rounded-lg transition-colors hover:bg-muted/50">
-                          <div className="relative">
-                            <Avatar className="h-12 w-12">
-                              <AvatarImage src={getChatAvatar(chat)} />
-                              <AvatarFallback>
-                                {getChatName(chat).charAt(0).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            {chat.chat_type === 'private' && (
-                              <span className={cn(
-                                "absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full ring-2 ring-background",
-                                chat.participants?.some((p: any) => p.is_online) 
-                                  ? "bg-green-500" 
-                                  : "bg-gray-400"
-                              )} />
-                            )}
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between">
-                              <h4 className="font-semibold truncate">
-                                {getChatName(chat)}
-                              </h4>
-                              <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                                {formatDistanceToNow(new Date(chat.updated_at), { addSuffix: true })}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between mt-1">
-                              <p className={cn(
-                                "text-sm truncate flex-1",
-                                chat.unread_count > 0 ? "font-medium" : "text-muted-foreground"
-                              )}>
-                                {getLastMessagePreview(chat)}
-                              </p>
-                              {chat.unread_count > 0 && (
-                                <Badge className="ml-2 shrink-0">
-                                  {chat.unread_count}
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="calls">
-          <Card>
-            <CardHeader>
-              <CardTitle>Call History</CardTitle>
-              <CardDescription>
-                View all your past calls
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {recentCalls.length === 0 ? (
-                <div className="text-center py-8">
-                  <Phone className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                  <h3 className="text-lg font-medium mb-2">No calls yet</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Start a call with your contacts
-                  </p>
-                  <Button asChild>
-                    <Link href="/call/setup?type=audio">Start a Call</Link>
-                  </Button>
-                </div>
-              ) : (
-                <ScrollArea className="h-[400px]">
-                  <div className="space-y-2">
-                    {recentCalls.map((call) => {
-                      const CallIcon = getCallIcon(call);
-                      const DirectionIcon = getCallDirectionIcon(call.direction);
-                      
-                      return (
-                        <div
-                          key={call.id}
-                          className="flex items-center space-x-4 p-3 rounded-lg hover:bg-muted/50 transition-colors"
-                        >
-                          <Avatar className="h-10 w-10">
-                            <AvatarImage src={call.with.profile_image} />
-                            <AvatarFallback>
-                              {call.with.username.charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between">
-                              <h4 className="font-medium">
-                                {call.with.username}
-                              </h4>
-                              <span className="text-xs text-muted-foreground">
-                                {format(new Date(call.started_at), 'MMM d, h:mm a')}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center space-x-3 mt-1">
-                              <div className="flex items-center space-x-1">
-                                <DirectionIcon className={cn(
-                                  "h-3 w-3",
-                                  getCallStatusColor(call.status)
-                                )} />
-                                <CallIcon className="h-3 w-3" />
-                              </div>
-                              
-                              <span className="text-xs text-muted-foreground">
-                                {call.status === 'completed' 
-                                  ? formatDuration(call.duration)
-                                  : call.status.charAt(0).toUpperCase() + call.status.slice(1)
-                                }
-                              </span>
-
-                              {call.type === 'video' && (
-                                <Badge variant="outline" className="text-[10px] h-4">
-                                  Video
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-
-                          <Button variant="ghost" size="icon" asChild>
-                            <Link href={`/call/setup?type=${call.type}&user=${call.with.id}`}>
-                              <Phone className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* Quick Actions Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="bg-primary/5 border-primary/20">
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-4">
-              <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                <UserPlus className="h-6 w-6 text-primary" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold">Add Contacts</h3>
-                <p className="text-sm text-muted-foreground">
-                  Find and connect with friends
-                </p>
-              </div>
-              <Button variant="ghost" size="icon" asChild>
-                <Link href="/contacts">
-                  <ChevronRight className="h-4 w-4" />
-                </Link>
-              </Button>
-            </div>
-          </CardContent>
         </Card>
 
-        <Card className="bg-green-500/5 border-green-500/20">
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-4">
-              <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center">
-                <Video className="h-6 w-6 text-green-500" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold">Start Video Call</h3>
-                <p className="text-sm text-muted-foreground">
-                  Face-to-face conversation
-                </p>
-              </div>
-              <Button variant="ghost" size="icon" asChild>
-                <Link href="/call/setup?type=video">
-                  <ChevronRight className="h-4 w-4" />
-                </Link>
-              </Button>
+        <Card className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Total Calls</p>
+              <p className="text-2xl font-bold mt-1">{stats.totalCalls}</p>
             </div>
-          </CardContent>
+            <div className="h-12 w-12 bg-blue-500/10 rounded-full flex items-center justify-center">
+              <Phone className="h-6 w-6 text-blue-500" />
+            </div>
+          </div>
         </Card>
 
-        <Card className="bg-blue-500/5 border-blue-500/20">
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-4">
-              <div className="h-12 w-12 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <Calendar className="h-6 w-6 text-blue-500" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold">Schedule Call</h3>
-                <p className="text-sm text-muted-foreground">
-                  Plan a call for later
-                </p>
-              </div>
-              <Button variant="ghost" size="icon">
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+        <Card className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Unread Messages</p>
+              <p className="text-2xl font-bold mt-1">{stats.unreadMessages}</p>
             </div>
-          </CardContent>
+            <div className="h-12 w-12 bg-yellow-500/10 rounded-full flex items-center justify-center">
+              <Badge variant="destructive" className="h-6 w-6 rounded-full p-0 flex items-center justify-center">
+                {stats.unreadMessages}
+              </Badge>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Online Contacts</p>
+              <p className="text-2xl font-bold mt-1">{stats.onlineContacts}</p>
+            </div>
+            <div className="h-12 w-12 bg-green-500/10 rounded-full flex items-center justify-center">
+              <Radio className="h-6 w-6 text-green-500 animate-pulse" />
+            </div>
+          </div>
         </Card>
       </div>
+
+      {/* Recent Chats */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Recent Chats</h2>
+            <Link href="/chat">
+              <Button variant="ghost" size="sm">
+                View All
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </Link>
+          </div>
+
+          <div className="space-y-2">
+            {recentChats.length > 0 ? (
+              recentChats.map((chat) => (
+                <Link
+                  key={chat.id}
+                  href={`/chat/${chat.id}`}
+                  className="flex items-center space-x-3 p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                >
+                  <Avatar>
+                    <AvatarImage src={chat.avatar} />
+                    <AvatarFallback>
+                      {chat.name.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="font-medium truncate">{chat.name}</p>
+                      {chat.lastMessageTime && (
+                        <span className="text-xs text-muted-foreground">
+                          {formatTime(chat.lastMessageTime)}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground truncate">
+                      {chat.lastMessage || 'No messages yet'}
+                    </p>
+                  </div>
+
+                  {chat.unreadCount > 0 && (
+                    <Badge variant="destructive" className="ml-auto">
+                      {chat.unreadCount}
+                    </Badge>
+                  )}
+                </Link>
+              ))
+            ) : (
+              <div className="text-center py-8">
+                <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/50 mb-3" />
+                <p className="text-muted-foreground">No recent chats</p>
+                <Link href="/chat">
+                  <Button variant="link" className="mt-2">
+                    Start a conversation
+                  </Button>
+                </Link>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {/* Recent Calls */}
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Recent Calls</h2>
+            <Link href="/calls">
+              <Button variant="ghost" size="sm">
+                View All
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </Link>
+          </div>
+
+          <div className="space-y-2">
+            {recentCalls.length > 0 ? (
+              recentCalls.map((call) => {
+                const { icon: CallIcon, color } = getCallDisplay(call);
+                
+                return (
+                  <Link
+                    key={call.id}
+                    href={`/call/${call.id}`}
+                    className="flex items-center space-x-3 p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                  >
+                    <Avatar>
+                      <AvatarImage src={call.with.avatar} />
+                      <AvatarFallback>
+                        {call.with.name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="font-medium truncate">{call.with.name}</p>
+                        <span className="text-xs text-muted-foreground">
+                          {formatTime(call.timestamp)}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2 mt-1">
+                        <CallIcon className={cn("h-3 w-3", color)} />
+                        <span className="text-xs text-muted-foreground">
+                          {call.type === 'video' ? '📹' : '🎤'} {call.type} call
+                        </span>
+                        {call.duration && (
+                          <>
+                            <span className="text-xs text-muted-foreground">•</span>
+                            <Clock className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">
+                              {formatDuration(call.duration)}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })
+            ) : (
+              <div className="text-center py-8">
+                <Phone className="h-12 w-12 mx-auto text-muted-foreground/50 mb-3" />
+                <p className="text-muted-foreground">No recent calls</p>
+                <Link href="/chat">
+                  <Button variant="link" className="mt-2">
+                    Start a call
+                  </Button>
+                </Link>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* Quick Actions */}
+      <Card className="p-6">
+        <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Button
+            variant="outline"
+            className="h-auto py-4 flex flex-col items-center space-y-2"
+            onClick={() => router.push('/chat')}
+          >
+            <MessageSquare className="h-6 w-6" />
+            <span>New Message</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-auto py-4 flex flex-col items-center space-y-2"
+            onClick={() => router.push('/calls')}
+          >
+            <Phone className="h-6 w-6" />
+            <span>Start Audio Call</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-auto py-4 flex flex-col items-center space-y-2"
+            onClick={() => router.push('/calls')}
+          >
+            <Video className="h-6 w-6" />
+            <span>Start Video Call</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-auto py-4 flex flex-col items-center space-y-2"
+            onClick={() => router.push('/contacts')}
+          >
+            <Users className="h-6 w-6" />
+            <span>Add Contact</span>
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }

@@ -17,7 +17,7 @@ interface UseChatReturn {
   error: string | null;
   hasMoreMessages: boolean;
 
-  fetchChats: () => Promise<void>;
+  fetchChats: () => Promise<Chat[]>;
   setCurrentChat: (chat: Chat | null) => void;
   createPrivateChat: (participantId: number) => Promise<Chat>;
   leaveChat: (chatId: string) => Promise<void>;
@@ -164,14 +164,16 @@ export const useChat = (chatId?: string): UseChatReturn => {
   }, [activeChatId, isTyping, emit, stopTyping]);
 
   // Chat actions
-  const fetchChats = useCallback(async () => {
-    try {
-      await fetchChatsAction();
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch chats');
-      throw err;
-    }
-  }, [fetchChatsAction, setError]);
+ const fetchChats = useCallback(async (): Promise<Chat[]> => {
+  try {
+    await fetchChatsAction();
+    return useChatStore.getState().chats; // ✅ RETURN CHATS
+  } catch (err: any) {
+    setError(err.message || 'Failed to fetch chats');
+    throw err;
+  }
+}, [fetchChatsAction, setError]);
+
 
   const setCurrentChat = useCallback((chat: Chat | null) => {
     setCurrentChatAction(chat);
