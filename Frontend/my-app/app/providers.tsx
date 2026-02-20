@@ -1,7 +1,7 @@
 'use client';
 
 import { ReactNode } from 'react';
-import { ThemeProvider } from 'next-themes';
+import { ThemeProvider as NextThemesProvider } from 'next-themes';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
@@ -11,16 +11,18 @@ interface ProvidersProps {
 
 export function Providers({ children }: ProvidersProps) {
   return (
-    <ThemeProvider
+    <NextThemesProvider
       attribute="class"
       defaultTheme="system"
       enableSystem={true}
       disableTransitionOnChange={true}
     >
-      <TooltipProvider>
-        {children}
-        <Toaster />
+      <TooltipProvider delayDuration={0}>
+        <div>
+          {children}
+          <Toaster />
+        </div>
       </TooltipProvider>
-    </ThemeProvider>
+    </NextThemesProvider>
   );
 }
