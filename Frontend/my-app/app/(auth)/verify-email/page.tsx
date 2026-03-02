@@ -38,7 +38,7 @@ export default function VerifyEmailPage() {
   // Redirect if already verified
   useEffect(() => {
     if (isAuthenticated && isEmailVerified) {
-      router.push('/');
+      router.push('/dashboard');
     }
   }, [isAuthenticated, isEmailVerified, router]);
 

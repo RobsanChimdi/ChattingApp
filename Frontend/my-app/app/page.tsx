@@ -513,8 +513,7 @@ export default function LandingPage() {
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li><Link href="#features" className="hover:text-foreground transition-colors">Features</Link></li>
                 <li><Link href="#pricing" className="hover:text-foreground transition-colors">Pricing</Link></li>
-                <li><Link href="/download" className="hover:text-foreground transition-colors">Download</Link></li>
-                <li><Link href="/integrations" className="hover:text-foreground transition-colors">Integrations</Link></li>
+              
               </ul>
             </div>
 
@@ -523,8 +522,6 @@ export default function LandingPage() {
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li><Link href="/about" className="hover:text-foreground transition-colors">About</Link></li>
                 <li><Link href="/blog" className="hover:text-foreground transition-colors">Blog</Link></li>
-                <li><Link href="/careers" className="hover:text-foreground transition-colors">Careers</Link></li>
-                <li><Link href="/press" className="hover:text-foreground transition-colors">Press</Link></li>
               </ul>
             </div>
 
@@ -533,8 +530,6 @@ export default function LandingPage() {
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li><Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link></li>
                 <li><Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link></li>
-                <li><Link href="/security" className="hover:text-foreground transition-colors">Security</Link></li>
-                <li><Link href="/cookies" className="hover:text-foreground transition-colors">Cookies</Link></li>
               </ul>
             </div>
           </div>
