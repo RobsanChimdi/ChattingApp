@@ -68,7 +68,7 @@ export const setupCallEvents = () => {
     reason: string;
     ended_by?: number;
   }) => {
-    callStore.endCall(data.call_id);
+    callStore.cleanup();
     
     // Stop ringtone
     stopRingtone();
@@ -215,7 +215,9 @@ export const setupCallEvents = () => {
 
   const playRingtone = () => {
     try {
-      ringtoneAudio = new Audio('/sounds/ringtone.mp3');
+      if (!ringtoneAudio) {
+          ringtoneAudio = new Audio('/sounds/ringtone.mp3');
+        }
       ringtoneAudio.loop = true;
       ringtoneAudio.volume = 0.7;
       ringtoneAudio.play().catch(() => {

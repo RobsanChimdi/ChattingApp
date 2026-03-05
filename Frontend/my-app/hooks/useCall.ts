@@ -94,7 +94,14 @@ export const useCall = (callId?: string): UseCallReturn => {
   
   // Get participants for current call
   const participants = activeCall ? storeParticipants.get(activeCall.id) || [] : [];
-  
+     useEffect(() => {
+  return () => {
+    if (qualityMonitorRef.current) {
+      clearInterval(qualityMonitorRef.current);
+    }
+  };
+}, []);
+
   // Setup socket listeners
   useEffect(() => {
     // Listen for incoming calls

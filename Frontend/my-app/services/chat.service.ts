@@ -13,21 +13,25 @@ export const chatService = {
 
   // Create chat
   async createChat(data: ChatCreateData): Promise<Chat> {
-    return api.post<Chat>('/chats/', data);
+    const response = await api.post<Chat>('/chats/', data);
+    return response.data;
   },
 
   // Create private chat
   async createPrivateChat(participantId: number): Promise<Chat> {
-    return api.post<Chat>('/chats/create-private/', { participant_id: participantId });
+    const response = await api.post<Chat>('/chats/create-private/', { participant_id: participantId });
+    return response.data;
   },
 
   // Chat details
   async getChat(chatId: string): Promise<Chat> {
-    return api.get<Chat>(`/chats/${chatId}/`);
+    const response = await api.get<Chat>(`/chats/${chatId}/`);
+    return response.data;
   },
 
   async updateChat(chatId: string, data: Partial<Chat>): Promise<Chat> {
-    return api.put<Chat>(`/chats/${chatId}/update/`, data);
+    const response = await api.put<Chat>(`/chats/${chatId}/update/`, data);
+    return response.data;
   },
 
   // Participants
@@ -53,7 +57,8 @@ export const chatService = {
 
   // Unread counts
   async getUnreadCounts(): Promise<Record<string, number>> {
-    return api.get<Record<string, number>>('/unread-counts/');
+    const response = await api.get<Record<string, number>>('/unread-counts/');
+    return response.data;
   },
 
   // Search messages
