@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, Group, Permission 
 from django.core.exceptions import ValidationError
 import os
 from django.utils import timezone
@@ -12,13 +12,28 @@ class User(AbstractUser):
     last_seen = models.DateTimeField(blank=True, null=True)
     is_online = models.BooleanField(default=False)
     
-    # Additional useful fields for messaging apps
     phone_number = models.CharField(max_length=20, blank=True, null=True, unique=True)
     status = models.CharField(max_length=100, blank=True, null=True, default="Hey there! I'm using ChatApp")
     privacy_last_seen = models.CharField(
         max_length=20,
         choices=[("everyone", "Everyone"), ("contacts", "Contacts Only"), ("nobody", "Nobody")],
         default="everyone"
+    )
+    
+    # ⚡ Fix reverse accessor conflicts
+    groups = models.ManyToManyField(
+        Group,
+        related_name='custom_users',  # unique name
+        blank=True,
+        help_text='The groups this user belongs to.',
+        verbose_name='groups'
+    )
+    user_permissions = models.ManyToManyField(
+        Permission,
+        related_name='custom_user_permissions',  # unique name
+        blank=True,
+        help_text='Specific permissions for this user.',
+        verbose_name='user permissions'
     )
     
     class Meta:
@@ -32,13 +47,11 @@ class User(AbstractUser):
         return self.username
     
     def update_last_seen(self):
-        """Update last_seen and online status"""
         self.last_seen = timezone.now()
         self.is_online = True
         self.save(update_fields=['last_seen', 'is_online'])
     
     def set_offline(self):
-        """Mark user as offline"""
         self.is_online = False
         self.save(update_fields=['is_online'])
 

@@ -7,6 +7,8 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.cache import cache
 from django.db import transaction
+import secrets
+from django.conf import settings
 
 from rest_framework import viewsets, generics, status, permissions, filters
 from rest_framework.decorators import action, api_view, permission_classes
@@ -16,6 +18,14 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
+
+# Add these imports at the top of views.py
+from django.db.models import Q
+from django.utils import timezone
+from datetime import timedelta
+import uuid
+from django.core.mail import send_mail
+from django.contrib.auth.password_validation import validate_password
 
 from .models import (
     User, Chat, Message, MessageMedia, MessageStatus, 
@@ -47,24 +57,174 @@ class RegisterView(generics.CreateAPIView):
         
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
         
-        # Auto-login after registration
-        username = serializer.validated_data.get('username')
-        password = request.data.get('password')
+        user = serializer.save(is_verified=False)
+        otp = ''.join(secrets.choice("0123456789") for _ in range(6))
+        user.verification_code==otp
+        user.verification_code_created_at = timezone.now()
+        user.save()
+
+        send_mail(
+                subject="Your OTP Code",
+                message=f"Your verification code is: {otp}",
+                from_email=settings.EMAIL_HOST_USER,
+                recipient_list=[user.email],  # replace with user email
+                fail_silently=False,
+            )
+     
+        return Response(
+            {"message": "User registered. Verification code sent to email."},
+            status=status.HTTP_201_CREATED
+        )
+
+class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        email = request.data.get('email')
+        code = request.data.get('verification_code')
         
-        if username and password:
-            user = authenticate(username=username, password=password)
-            if user:
-                token, created = Token.objects.get_or_create(user=user)
-                return Response({
-                    'token': token.key,
-                    'user': UserSerializer(user).data
-                }, status=status.HTTP_201_CREATED)
+        if not email or not code:
+            return Response(
+                {"error": "Email and verification code are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+        
+        if hasattr(user, 'verification_code') and user.verification_code == code:
+            if user.verification_code_created_at<timezone.now()-timedelta(minutes=5):
+                 return Response({"error": "Code expired"}, status=400)
+            user.is_verified = True
+            user.verification_code = None
+            user.verification_code_created_at = None
+            user.save()
+            return Response({"status": "verified"})
+        else:
+            return Response({"error": "Invalid verification code"}, status=400)
 
 
+class ResendVerificationView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        email = request.data.get('email')
+        
+        if not email:
+            return Response(
+                {"error": "Email is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+        
+        if user.is_verified:
+            return Response({"error": "Email already verified"}, status=400)
+        
+        # Generate new code
+        if hasattr(user, 'generate_verification_code'):
+            user.generate_verification_code()
+            
+            # Send email
+            send_mail(
+                subject="Verify Your Account",
+                message=f"Your verification code is: {user.verification_code}",
+                from_email="noreply@yourapp.com",
+                recipient_list=[user.email],
+                fail_silently=True
+            )
+            
+            return Response({"status": "verification_code_sent"})
+        
+        return Response({"error": "Verification not available"}, status=400)
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        email = request.data.get('email')
+        
+        if not email:
+            return Response(
+                {"error": "Email is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            # Return success even if user doesn't exist (security)
+            return Response({"status": "reset_email_sent"})
+        
+        # Generate reset token
+        token = uuid.uuid4()
+        user.reset_token = token
+        user.reset_token_expiry = timezone.now() + timedelta(hours=1)
+        user.save()
+        
+        # Send email
+        send_mail(
+            subject="Password Reset Request",
+            message=f"Your password reset token is: {token}\n\nThis token will expire in 1 hour.",
+            from_email="noreply@yourapp.com",
+            recipient_list=[user.email],
+            fail_silently=True
+        )
+        
+        return Response({"status": "reset_email_sent"})
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        token = request.data.get('reset_token')
+        new_password = request.data.get('new_password')
+        confirm_password = request.data.get('confirm_password')
+        
+        if not token or not new_password or not confirm_password:
+            return Response(
+                {"error": "Token, new password, and confirm password are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if new_password != confirm_password:
+            return Response(
+                {"error": "Passwords do not match"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(
+                reset_token=token, 
+                reset_token_expiry__gte=timezone.now()
+            )
+        except User.DoesNotExist:
+            return Response(
+                {"error": "Invalid or expired token"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate password
+        try:
+            validate_password(new_password, user)
+        except ValidationError as e:
+            return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user.set_password(new_password)
+        user.reset_token = None
+        user.reset_token_expiry = None
+        user.save()
+        
+        return Response({"status": "password_reset_success"})
+    
 class LoginView(APIView):
     permission_classes = [AllowAny]
     
@@ -199,9 +359,11 @@ class UserOnlineStatusView(APIView):
         elif user.privacy_last_seen == 'contacts' and user != request.user:
             # Check if users have a chat together
             has_chat = Chat.objects.filter(
-                participants=user,
-                participants=request.user,
                 chat_type='private'
+            ).filter(
+                participants=user
+            ).filter(
+                participants=request.user
             ).exists()
             
             if not has_chat:
