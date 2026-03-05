@@ -3,6 +3,8 @@ import { devtools } from 'zustand/middleware';
 import type { Call, CallParticipant, CallQuality } from '../types/call.types';
 import { callService } from '../services/call.service';
 import type { WebRTCSignal } from '../types/socket.types';
+import { useAuthStore } from './authStore';
+
 
 interface CallStore {
   // State
@@ -112,6 +114,7 @@ export const useCallStore = create<CallStore>()(
             call: call.id,
             role: 'initiator',
             joined_at: new Date().toISOString(),
+            is_speaking:false,
             is_muted: false,
             has_video: callType === 'video',
           });
@@ -232,16 +235,23 @@ export const useCallStore = create<CallStore>()(
       
       // Participant management
       addParticipant: (callId, participant) => {
-        set((state) => {
-          const callParticipants = state.participants.get(callId) || [];
-          return {
-            participants: new Map(state.participants).set(
-              callId,
-              [...callParticipants, participant]
-            ),
-          };
-        });
-      },
+            set((state) => {
+              const callParticipants = state.participants.get(callId) || [];
+
+              const exists = callParticipants.some(
+                (p) => p.user.id === participant.user.id
+              );
+
+              if (exists) return state;
+
+              return {
+                participants: new Map(state.participants).set(callId, [
+                  ...callParticipants,
+                  participant,
+                ]),
+              };
+            });
+          },
       
       removeParticipant: (callId, userId) => {
         set((state) => {
@@ -469,9 +479,6 @@ export const useCallStore = create<CallStore>()(
     { name: 'call-store' }
   )
 );
-
-// Import auth store for user reference
-import { useAuthStore } from './authStore';
 
 // Selectors for better performance
 export const useActiveCall = () => useCallStore((state) => state.activeCall);
