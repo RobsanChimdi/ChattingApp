@@ -30,6 +30,10 @@ class User(AbstractUser):
     reset_token = models.UUIDField(blank=True, null=True)
     reset_token_expiry = models.DateTimeField(blank=True, null=True)
 
+    # WebSocket token
+    websocket_token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    websocket_token_expiry = models.DateTimeField(blank=True, null=True)
+
     def generate_verification_code(self):
         self.verification_code = get_random_string(6, allowed_chars='0123456789')
         self.save(update_fields=['verification_code'])
@@ -39,11 +43,30 @@ class User(AbstractUser):
         self.reset_token_expiry = timezone.now() + timedelta(hours=hours_valid)
         self.save(update_fields=['reset_token', 'reset_token_expiry'])
     
+    def generate_websocket_token(self, hours_valid=24):
+        """Generate token for WebSocket authentication"""
+        self.websocket_token = uuid.uuid4()
+        self.websocket_token_expiry = timezone.now() + timedelta(hours=hours_valid)
+        self.save(update_fields=['websocket_token', 'websocket_token_expiry'])
+        return {
+            'token': str(self.websocket_token),
+            'user_id': self.id
+        }
+    
+    def verify_websocket_token(self, token):
+        """Verify WebSocket token"""
+        if not token or str(self.websocket_token) != token:
+            return False
+        if self.websocket_token_expiry and self.websocket_token_expiry < timezone.now():
+            return False
+        return True
+    
     class Meta:
         ordering = ['username']
         indexes = [
             models.Index(fields=['last_seen']),
             models.Index(fields=['is_online']),
+            models.Index(fields=['websocket_token']),
         ]
     
     def __str__(self):
@@ -137,7 +160,7 @@ class Message(models.Model):
         ("video", "Video"),
         ("audio", "Audio"),
         ("file", "File"),
-        ("location", "Location"),  # Added location type
+        ("location", "Location"),
     )
     
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name="messages")
@@ -166,13 +189,14 @@ class Message(models.Model):
     client_message_id = models.CharField(max_length=100, blank=True, null=True, unique=True)
     
     class Meta:
-        ordering = ["created_at"]
+        ordering = ["-created_at"]  # Changed to descending for frontend
         verbose_name = "Message"
         verbose_name_plural = "Messages"
         indexes = [
-            models.Index(fields=['chat', 'created_at']),
-            models.Index(fields=['sender', 'created_at']),
+            models.Index(fields=['chat', '-created_at']),  # Changed to descending
+            models.Index(fields=['sender', '-created_at']),  # Changed to descending
             models.Index(fields=['is_deleted']),
+            models.Index(fields=['client_message_id']),
         ]
     
     def __str__(self):
@@ -262,6 +286,17 @@ class Message(models.Model):
         """Get summary of reactions"""
         reactions = self.reactions.values('emoji').annotate(count=Count('emoji')).order_by('-count')
         return list(reactions)
+    
+    @property
+    def status_summary(self):
+        """Get delivery/read status summary"""
+        statuses = self.statuses.all()
+        return {
+            'sent': statuses.filter(status='sent').count(),
+            'delivered': statuses.filter(status='delivered').count(),
+            'read': statuses.filter(status='read').count(),
+            'failed': statuses.filter(status='failed').count(),
+        }
 
 
 class MessageMedia(models.Model):
@@ -456,7 +491,7 @@ class Call(models.Model):
     class Meta:
         ordering = ["-started_at"]
         indexes = [
-            models.Index(fields=['chat', 'started_at']),
+            models.Index(fields=['chat', '-started_at']),
             models.Index(fields=['status']),
         ]
     
@@ -504,21 +539,33 @@ class Call(models.Model):
 
 
 class CallParticipant(models.Model):
+    ROLES = (
+        ("initiator", "Initiator"),
+        ("caller", "Caller"),
+        ("callee", "Callee"),
+        ("participant", "Participant"),
+    )
+    
     call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="participants")
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     joined_at = models.DateTimeField(auto_now_add=True)
     left_at = models.DateTimeField(blank=True, null=True)
     is_muted = models.BooleanField(default=False)
     is_video_enabled = models.BooleanField(default=True)
+    is_speaking = models.BooleanField(default=False)  # New field for real-time speaking status
     role = models.CharField(
         max_length=20,
-        choices=[("caller", "Caller"), ("callee", "Callee"), ("participant", "Participant")],
+        choices=ROLES,
         default="participant"
     )
+    has_video = models.BooleanField(default=False)  # New field to match frontend
     
     class Meta:
         unique_together = ("call", "user")
         ordering = ['joined_at']
+        indexes = [
+            models.Index(fields=['call', 'is_speaking']),
+        ]
     
     def __str__(self):
         return f"{self.user.username} in Call {self.call.id}"
@@ -541,7 +588,13 @@ class CallParticipant(models.Model):
     
     def toggle_video(self):
         self.is_video_enabled = not self.is_video_enabled
-        self.save(update_fields=['is_video_enabled'])
+        self.has_video = self.is_video_enabled
+        self.save(update_fields=['is_video_enabled', 'has_video'])
+    
+    def set_speaking(self, is_speaking):
+        """Update speaking status"""
+        self.is_speaking = is_speaking
+        self.save(update_fields=['is_speaking'])
 
 
 class CallQuality(models.Model):
@@ -555,17 +608,20 @@ class CallQuality(models.Model):
     
     call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="quality_logs")
     participant = models.ForeignKey(CallParticipant, on_delete=models.CASCADE, null=True, blank=True)
-    latency_ms = models.IntegerField()
-    jitter_ms = models.IntegerField()
-    packet_loss = models.FloatField()
+    latency_ms = models.IntegerField()  # round_trip_time in frontend
+    jitter_ms = models.IntegerField()  # jitter in frontend
+    packet_loss = models.FloatField()  # packet_loss in frontend
     bitrate_kbps = models.IntegerField(null=True, blank=True)
+    audio_bitrate = models.IntegerField(null=True, blank=True)  # New field
+    video_bitrate = models.IntegerField(null=True, blank=True)  # New field
+    audio_level = models.FloatField(null=True, blank=True)  # New field
     quality_status = models.CharField(max_length=20, choices=QUALITY_STATUS, blank=True, null=True)
     measured_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         ordering = ["-measured_at"]
         indexes = [
-            models.Index(fields=['call', 'measured_at']),
+            models.Index(fields=['call', '-measured_at']),
             models.Index(fields=['quality_status']),
         ]
     
@@ -609,7 +665,10 @@ class CallQuality(models.Model):
             avg_latency=Avg('latency_ms'),
             avg_jitter=Avg('jitter_ms'),
             avg_packet_loss=Avg('packet_loss'),
-            avg_bitrate=Avg('bitrate_kbps')
+            avg_bitrate=Avg('bitrate_kbps'),
+            avg_audio_bitrate=Avg('audio_bitrate'),
+            avg_video_bitrate=Avg('video_bitrate'),
+            avg_audio_level=Avg('audio_level')
         )
         
         return {
@@ -617,6 +676,9 @@ class CallQuality(models.Model):
             "average_jitter_ms": round(avg['avg_jitter'], 2) if avg['avg_jitter'] else None,
             "average_packet_loss": round(avg['avg_packet_loss'], 2) if avg['avg_packet_loss'] else None,
             "average_bitrate_kbps": round(avg['avg_bitrate'], 2) if avg['avg_bitrate'] else None,
+            "average_audio_bitrate": round(avg['avg_audio_bitrate'], 2) if avg['avg_audio_bitrate'] else None,
+            "average_video_bitrate": round(avg['avg_video_bitrate'], 2) if avg['avg_video_bitrate'] else None,
+            "average_audio_level": round(avg['avg_audio_level'], 2) if avg['avg_audio_level'] else None,
             "total_logs": logs.count()
         }
     
@@ -632,7 +694,8 @@ class CallQuality(models.Model):
         
         # Get quality trends
         trends = logs.order_by('measured_at').values(
-            'measured_at', 'latency_ms', 'jitter_ms', 'packet_loss', 'quality_status'
+            'measured_at', 'latency_ms', 'jitter_ms', 'packet_loss', 
+            'audio_bitrate', 'video_bitrate', 'audio_level', 'quality_status'
         )[:50]  # Limit to recent 50 logs
         
         avg_metrics = cls.average_quality(call_id)
