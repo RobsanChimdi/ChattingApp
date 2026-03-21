@@ -40,7 +40,7 @@ class UserSerializer(serializers.ModelSerializer):
             bio=validated_data.get('bio', ''),
             phone_number=validated_data.get('phone_number', ''),
             status=validated_data.get('status', ''),
-            privacy_last_seen=validatedated_data.get('privacy_last_seen', 'everyone')
+            privacy_last_seen=validated_data.get('privacy_last_seen', 'everyone')
         )
         # Optional: generate verification code
         if hasattr(user, 'generate_verification_code'):
@@ -50,11 +50,12 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserProfileSerializer(serializers.ModelSerializer):
     profile_image_url = serializers.SerializerMethodField()
+    display_name = serializers.SerializerMethodField()
     
     class Meta:
         model = User
         fields = [
-            "id", "username", "email", "first_name", "last_name",
+            "id", "username", "email", "first_name", "last_name", "display_name",
             "profile_image", "profile_image_url", "bio", "phone_number", "status",
             "privacy_last_seen", "last_seen", "is_online", "is_verified"
         ]
@@ -70,6 +71,26 @@ class UserProfileSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.profile_image.url)
             return obj.profile_image.url
         return None
+    
+    def get_display_name(self, obj):
+        """Get display name for user"""
+        if obj.first_name and obj.last_name:
+            return f"{obj.first_name} {obj.last_name}"
+        elif obj.first_name:
+            return obj.first_name
+        elif obj.last_name:
+            return obj.last_name
+        return obj.username
+
+
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField(required=True)
+    password = serializers.CharField(required=True, write_only=True)
+
+
+class RegisterSerializer(UserSerializer):
+    """Alias for UserSerializer for registration"""
+    pass
 
 
 class EmailVerificationSerializer(serializers.Serializer):
@@ -90,6 +111,12 @@ class PasswordResetSerializer(serializers.Serializer):
         if attrs['new_password'] != attrs['confirm_password']:
             raise serializers.ValidationError({"password": "Password fields didn't match."})
         return attrs
+
+
+class WebSocketTokenSerializer(serializers.Serializer):
+    """Serializer for WebSocket token response"""
+    token = serializers.CharField(read_only=True)
+    user_id = serializers.IntegerField(read_only=True)
 
 
 # ========== MESSAGE MEDIA SERIALIZER ==========
@@ -352,6 +379,7 @@ class MessageSerializer(serializers.ModelSerializer):
     reactions = MessageReactionSerializer(many=True, read_only=True)
     reply_to_info = serializers.SerializerMethodField(read_only=True)
     location_data = serializers.SerializerMethodField(read_only=True)
+    status_summary = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Message
@@ -360,7 +388,7 @@ class MessageSerializer(serializers.ModelSerializer):
             'message_type', 'text', 'created_at', 'updated_at', 'is_edited',
             'is_forwarded', 'is_deleted', 'deleted_at', 'deleted_by',
             'reply_to', 'reply_to_info', 'latitude', 'longitude', 'location_name',
-            'location_data', 'media', 'statuses', 'reactions'
+            'location_data', 'media', 'statuses', 'reactions', 'status_summary'
         ]
         read_only_fields = [
             'created_at', 'updated_at', 'is_edited', 'is_forwarded',
@@ -400,6 +428,19 @@ class MessageSerializer(serializers.ModelSerializer):
                 'location_name': obj.location_name
             }
         return None
+    
+    def get_status_summary(self, obj):
+        """Get delivery/read status summary"""
+        if hasattr(obj, 'status_summary'):
+            return obj.status_summary
+        # Calculate if method doesn't exist
+        statuses = obj.statuses.all() if hasattr(obj, 'statuses') else []
+        return {
+            'sent': sum(1 for s in statuses if s.status == 'sent'),
+            'delivered': sum(1 for s in statuses if s.status == 'delivered'),
+            'read': sum(1 for s in statuses if s.status == 'read'),
+            'failed': sum(1 for s in statuses if s.status == 'failed'),
+        }
     
     def validate(self, data):
         chat = data.get('chat')
@@ -485,7 +526,13 @@ class ChatListSerializer(serializers.ModelSerializer):
         if obj.chat_type == 'private':
             other_user = obj.participants.exclude(id=request.user.id).first()
             if other_user:
-                return other_user.get_display_name()
+                if other_user.first_name and other_user.last_name:
+                    return f"{other_user.first_name} {other_user.last_name}"
+                elif other_user.first_name:
+                    return other_user.first_name
+                elif other_user.last_name:
+                    return other_user.last_name
+                return other_user.username
         return obj.name
     
     def get_display_image(self, obj):
@@ -525,9 +572,6 @@ class ChatListSerializer(serializers.ModelSerializer):
     def get_unread_count(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            if hasattr(obj, 'unread_count'):
-                return obj.unread_count(request.user)
-            # Calculate manually if method doesn't exist
             return obj.messages.filter(
                 ~Q(sender=request.user),
                 statuses__user=request.user,
@@ -540,12 +584,15 @@ class ChatListSerializer(serializers.ModelSerializer):
         return [{
             'id': user.id,
             'username': user.username,
-            'display_name': user.get_display_name(),
+            'display_name': user.get_display_name() if hasattr(user, 'get_display_name') else user.username,
             'profile_image': user.profile_image.url if user.profile_image else None,
-            'is_online': user.is_online
+            'is_online': user.is_online,
+            'last_seen': user.last_seen
         } for user in participants]
     
     def _get_message_summary(self, obj):
+        if obj.is_deleted:
+            return "This message was deleted"
         if obj.message_type == 'text':
             return obj.text[:100] + '...' if obj.text and len(obj.text) > 100 else obj.text
         elif obj.message_type == 'image':
@@ -653,9 +700,10 @@ class ChatSerializer(serializers.ModelSerializer):
         return [{
             'id': user.id,
             'username': user.username,
-            'display_name': user.get_display_name(),
+            'display_name': user.get_display_name() if hasattr(user, 'get_display_name') else user.username,
             'profile_image': user.profile_image.url if user.profile_image else None,
-            'is_online': user.is_online
+            'is_online': user.is_online,
+            'last_seen': user.last_seen
         } for user in participants]
     
     def get_last_message(self, obj):
@@ -702,14 +750,17 @@ class ChatUpdateSerializer(serializers.ModelSerializer):
 class CallParticipantSerializer(serializers.ModelSerializer):
     user_info = serializers.SerializerMethodField(read_only=True)
     duration = serializers.SerializerMethodField(read_only=True)
+    has_video = serializers.BooleanField(source='is_video_enabled', read_only=True)
+    is_speaking = serializers.BooleanField(read_only=True)
     
     class Meta:
         model = CallParticipant
         fields = [
             'id', 'call', 'user', 'user_info', 'joined_at', 'left_at',
-            'is_muted', 'is_video_enabled', 'role', 'duration'
+            'is_muted', 'is_video_enabled', 'has_video', 'is_speaking',
+            'role', 'duration'
         ]
-        read_only_fields = ['joined_at', 'left_at', 'duration']
+        read_only_fields = ['joined_at', 'left_at', 'duration', 'is_speaking']
         extra_kwargs = {
             'call': {'write_only': True},
             'user': {'write_only': True}
@@ -719,9 +770,10 @@ class CallParticipantSerializer(serializers.ModelSerializer):
         return {
             'id': obj.user.id,
             'username': obj.user.username,
-            'display_name': obj.user.get_display_name(),
+            'display_name': obj.user.get_display_name() if hasattr(obj.user, 'get_display_name') else obj.user.username,
             'profile_image': obj.user.profile_image.url if obj.user.profile_image else None,
-            'is_online': obj.user.is_online
+            'is_online': obj.user.is_online,
+            'last_seen': obj.user.last_seen
         }
     
     def get_duration(self, obj):
@@ -770,8 +822,9 @@ class CallQualitySerializer(serializers.ModelSerializer):
         model = CallQuality
         fields = [
             'id', 'call', 'participant', 'latency_ms', 'jitter_ms',
-            'packet_loss', 'bitrate_kbps', 'quality_status',
-            'is_good_quality', 'is_poor_quality', 'measured_at'
+            'packet_loss', 'bitrate_kbps', 'audio_bitrate', 'video_bitrate',
+            'audio_level', 'quality_status', 'is_good_quality', 'is_poor_quality',
+            'measured_at'
         ]
         read_only_fields = ['measured_at', 'quality_status', 'is_good_quality', 'is_poor_quality']
         extra_kwargs = {
@@ -798,6 +851,11 @@ class CallQualitySerializer(serializers.ModelSerializer):
         if value is not None and (value < 0 or value > 10000):  # Max 10 Mbps
             raise serializers.ValidationError("Bitrate must be between 0 and 10000 kbps.")
         return value
+    
+    def validate_audio_level(self, value):
+        if value is not None and (value < 0 or value > 1):
+            raise serializers.ValidationError("Audio level must be between 0 and 1.")
+        return value
 
 
 # ========== CALL SERIALIZER ==========
@@ -809,19 +867,21 @@ class CallSerializer(serializers.ModelSerializer):
     duration_seconds = serializers.SerializerMethodField(read_only=True)
     participant_count = serializers.SerializerMethodField(read_only=True)
     active_participant_count = serializers.SerializerMethodField(read_only=True)
+    is_ongoing = serializers.BooleanField(read_only=True)
     
     class Meta:
         model = Call
         fields = [
             'id', 'chat', 'chat_info', 'call_type', 'status',
             'started_at', 'ended_at', 'call_duration', 'duration_seconds',
-            'initiated_by', 'initiated_by_info', 'is_group_call',
+            'initiated_by', 'initiated_by_info', 'is_group_call', 'is_ongoing',
             'participants', 'participant_count', 'active_participant_count',
             'quality_logs'
         ]
         read_only_fields = [
             'started_at', 'ended_at', 'call_duration', 'status',
-            'duration_seconds', 'participant_count', 'active_participant_count'
+            'duration_seconds', 'participant_count', 'active_participant_count',
+            'is_ongoing'
         ]
         extra_kwargs = {
             'initiated_by': {'write_only': True}
@@ -832,7 +892,7 @@ class CallSerializer(serializers.ModelSerializer):
             return {
                 'id': obj.initiated_by.id,
                 'username': obj.initiated_by.username,
-                'display_name': obj.initiated_by.get_display_name(),
+                'display_name': obj.initiated_by.get_display_name() if hasattr(obj.initiated_by, 'get_display_name') else obj.initiated_by.username,
                 'profile_image': obj.initiated_by.profile_image.url if obj.initiated_by.profile_image else None
             }
         return None
@@ -882,7 +942,7 @@ class CallSerializer(serializers.ModelSerializer):
         CallParticipant.objects.create(
             call=call,
             user=validated_data['initiated_by'],
-            role='caller'
+            role='initiator'
         )
         
         return call
