@@ -1,20 +1,20 @@
+// user.types.ts
 export interface User {
   id: number;
   username: string;
   email: string;
-  first_name?: string;
-  last_name?: string;
-  avatar?: string;
-  bio?: string;
-  is_online: boolean;
-  last_seen: string;
-  status?: 'online' | 'away' | 'busy' | 'offline';
+  first_name: string;
+  last_name: string;
+  profile_image: string | null;
+  profile_image_url?: string | null;
+  bio: string;
+  phone_number?: string;
+  status: string;
   privacy_last_seen: 'everyone' | 'contacts' | 'nobody';
+  last_seen: string | null;
+  is_online: boolean;
+  is_verified: boolean;
   date_joined: string;
-  last_login: string;
-  is_active: boolean;
-  is_staff: boolean;
-  is_superuser: boolean;
 }
 
 export interface UserProfile extends Omit<User, 'password' | 'is_superuser' | 'is_staff'> {
@@ -65,13 +65,17 @@ export interface LoginCredentials {
 
 export interface RegisterData extends LoginCredentials {
   email: string;
+  confirm_password: string;
   first_name?: string;
   last_name?: string;
+  bio?: string;
+  phone_number?: string;
 }
 
 export interface AuthResponse {
   token: string;
   user: User;
+  user_id: number;
 }
 
 export interface WebSocketToken {
@@ -95,8 +99,8 @@ export interface UpdateProfileData {
   first_name?: string;
   last_name?: string;
   email?: string;
-  avatar?: string;
+  profile_image?: File | string;
   bio?: string;
-  status?: 'online' | 'away' | 'busy' | 'offline';
+  status?: string;
   privacy_last_seen?: 'everyone' | 'contacts' | 'nobody';
 }

@@ -1,18 +1,19 @@
+// store/chat.store.ts
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { Message, MessageReaction, MessageStatus } from '../types/message.types';
-import type { Chat } from '../types/chat.types';
+import type { Chat, ChatListItem } from '../types/chat.types';
 import type { User } from '../types/user.types';
-import { chatService} from '../services/chat.service';
+import { chatService } from '../services/chat.service';
 import { messageService } from '../services/message.service';
-
+import { useAuthStore } from './authStore'; 
 interface ChatStore {
   // State
-  chats: Chat[];
-  currentChat: Chat | null;
-  messages: Map<string, Message[]>; // chatId -> messages
-  unreadCounts: Map<string, number>;
-  typingUsers: Map<string, Set<number>>; // chatId -> userIds
+  chats: ChatListItem[];
+  currentChat: ChatListItem | null; 
+  messages: Map<number, Message[]>; 
+  unreadCounts: Map<number, number>;
+  typingUsers: Map<number, Set<number>>; // chatId -> userIds
   onlineUsers: Map<number, { is_online: boolean; last_seen?: string }>;
   isLoading: boolean;
   isSending: boolean;
@@ -21,79 +22,76 @@ interface ChatStore {
   // Actions
   // Chats
   fetchChats: () => Promise<void>;
-  setChats: (chats: Chat[]) => void;
-  setCurrentChat: (chat: Chat | null) => void;
-  addChat: (chat: Chat) => void;
-  updateChat: (chat: Chat) => void;
+  setChats: (chats: ChatListItem[]) => void;
+  setCurrentChat: (chat: ChatListItem | null) => void; // FIXED: changed to ChatListItem
+  addChat: (chat: ChatListItem) => void;
+  updateChat: (chat: ChatListItem) => void;
   createPrivateChat: (participantId: number) => Promise<Chat>;
-  leaveChat: (chatId: string) => Promise<void>;
+  leaveChat: (chatId: number) => Promise<void>;
   
   // Messages
-  fetchMessages: (chatId: string, page?: number) => Promise<void>;
-  sendMessage: (chatId: string, data: {
+  fetchMessages: (chatId: number, page?: number) => Promise<void>;
+  sendMessage: (chatId: number, data: {
     text?: string;
     files?: File[];
-    reply_to?: string;
+    reply_to?: number;
   }) => Promise<Message | null>;
-  editMessage: (chatId: string, messageId: string, text: string) => Promise<void>;
-  deleteMessage: (chatId: string, messageId: string) => Promise<void>;
-  forwardMessage: (messageId: string, targetChatId: string) => Promise<void>;
-  addMessage: (chatId: string, message: Message) => void;
-  updateMessage: (chatId: string, message: Message) => void;
-  deleteMessageLocal: (chatId: string, messageId: string) => void;
+  editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
+  deleteMessage: (chatId: number, messageId: number) => Promise<void>;
+  forwardMessage: (messageId: number, targetChatId: number) => Promise<void>;
+  addMessage: (chatId: number, message: Message) => void;
+  updateMessage: (chatId: number, message: Message) => void;
+  deleteMessageLocal: (chatId: number, messageId: number) => void;
   
   // Reactions
-  addReaction: (
-    chatId: string, 
-    messageId: string, 
-    reaction: MessageReaction
-  ) => void;
-  removeReaction: (chatId: string, messageId: string, userId: number) => void;
+  addReaction: (chatId: number, messageId: number, reaction: MessageReaction) => void;
+  removeReaction: (chatId: number, messageId: number, userId: number) => void;
   
   // Message status
   updateMessageStatus: (
-    chatId: string,
-    messageId: string,
+    chatId: number,
+    messageId: number,
     status: 'delivered' | 'read',
     userId: number
   ) => void;
-  markAllAsRead: (chatId: string) => Promise<void>;
+  markAllAsRead: (chatId: number) => Promise<void>;
   
   // Unread counts
   fetchUnreadCounts: () => Promise<void>;
-  setUnreadCount: (chatId: string, count: number) => void;
-  incrementUnreadCount: (chatId: string) => void;
-  resetUnreadCount: (chatId: string) => void;
+  setUnreadCount: (chatId: number, count: number) => void;
+  incrementUnreadCount: (chatId: number) => void;
+  resetUnreadCount: (chatId: number) => void;
   
   // Participants
-  addParticipant: (chatId: string, user: User) => void;
-  removeParticipant: (chatId: string, userId: number) => void;
+  addParticipant: (chatId: number, user: User) => void;
+  removeParticipant: (chatId: number, userId: number) => void;
   
   // Typing indicators
-  setTypingUser: (chatId: string, userId: number) => void;
-  clearTypingUser: (chatId: string, userId: number) => void;
+  setTypingUser: (chatId: number, userId: number) => void;
+  clearTypingUser: (chatId: number, userId: number) => void;
   
   // User status
-  updateUserStatus: (
-    userId: number,
-    is_online: boolean,
-    last_seen?: string
-  ) => void;
+  updateUserStatus: (userId: number, is_online: boolean, last_seen?: string) => void;
   
   // Search
-  searchMessages: (query: string, chatId?: string) => Promise<Message[]>;
+  searchMessages: (query: string, chatId?: number) => Promise<Message[]>;
   
   // UI State
   setLoading: (loading: boolean) => void;
   setSending: (sending: boolean) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
+  
+  // Helper getters
+  getChatById: (chatId: number) => ChatListItem | undefined;
+  getUnreadTotal: () => number;
+  hasUnreadMessages: (chatId: number) => boolean;
 }
 
 export const useChatStore = create<ChatStore>()(
   devtools(
     (set, get) => ({
-      // Initial state
+      // ========== INITIAL STATE ==========
       chats: [],
       currentChat: null,
       messages: new Map(),
@@ -104,15 +102,13 @@ export const useChatStore = create<ChatStore>()(
       isSending: false,
       error: null,
       
-      // Chat actions
+      // ========== CHAT ACTIONS ==========
       fetchChats: async () => {
         set({ isLoading: true, error: null });
         
         try {
           const response = await chatService.getChats();
           set({ chats: response.results, isLoading: false });
-          
-          // Also fetch unread counts
           await get().fetchUnreadCounts();
         } catch (error: any) {
           set({
@@ -127,10 +123,8 @@ export const useChatStore = create<ChatStore>()(
       
       setCurrentChat: (chat) => {
         set({ currentChat: chat });
-        
-        // Reset unread count for this chat
         if (chat) {
-          get().resetUnreadCount(chat.id);
+          get().resetUnreadCount(Number(chat.id));
         }
       },
       
@@ -154,11 +148,22 @@ export const useChatStore = create<ChatStore>()(
         try {
           const chat = await chatService.createPrivateChat(participantId);
           
-          // Add to chats list if not already present
+          const chatListItem: ChatListItem = {
+            id: chat.id,
+            name: chat.display_name,
+            display_name: chat.display_name,
+            image: chat.image,
+            display_image: chat.display_image,
+            chat_type: chat.chat_type,
+            description: chat.description,
+            unread_count: 0,
+            updated_at: chat.updated_at,
+          };
+          
           set((state) => {
             const exists = state.chats.some((c) => c.id === chat.id);
             return {
-              chats: exists ? state.chats : [chat, ...state.chats],
+              chats: exists ? state.chats : [chatListItem, ...state.chats],
               isLoading: false,
             };
           });
@@ -184,7 +189,6 @@ export const useChatStore = create<ChatStore>()(
             isLoading: false,
           }));
           
-          // Clear messages for this chat
           const messages = new Map(get().messages);
           messages.delete(chatId);
           set({ messages });
@@ -197,7 +201,7 @@ export const useChatStore = create<ChatStore>()(
         }
       },
       
-      // Message actions
+      // ========== MESSAGE ACTIONS ==========
       fetchMessages: async (chatId, page = 1) => {
         set({ isLoading: true, error: null });
         
@@ -225,14 +229,12 @@ export const useChatStore = create<ChatStore>()(
         set({ isSending: true, error: null });
         
         try {
-          const message = await messageService.createMessage({
+          const message = await messageService.sendMessage({
             chat: chatId,
             ...data,
           });
           
-          // Optimistically add to store
           get().addMessage(chatId, message);
-          
           set({ isSending: false });
           return message;
         } catch (error: any) {
@@ -250,7 +252,6 @@ export const useChatStore = create<ChatStore>()(
         try {
           const message = await messageService.editMessage(messageId, text);
           get().updateMessage(chatId, message);
-          
           set({ isLoading: false });
         } catch (error: any) {
           set({
@@ -267,7 +268,6 @@ export const useChatStore = create<ChatStore>()(
         try {
           await messageService.deleteMessage(messageId);
           get().deleteMessageLocal(chatId, messageId);
-          
           set({ isLoading: false });
         } catch (error: any) {
           set({
@@ -284,7 +284,6 @@ export const useChatStore = create<ChatStore>()(
         try {
           const message = await messageService.forwardMessage(messageId, targetChatId);
           get().addMessage(targetChatId, message);
-          
           set({ isLoading: false });
         } catch (error: any) {
           set({
@@ -305,6 +304,11 @@ export const useChatStore = create<ChatStore>()(
             ),
           };
         });
+        
+        const currentUser = useAuthStore.getState().user;
+        if (currentUser && message.sender !== currentUser.id) {
+          get().incrementUnreadCount(chatId);
+        }
       },
       
       updateMessage: (chatId, message) => {
@@ -339,7 +343,7 @@ export const useChatStore = create<ChatStore>()(
         });
       },
       
-      // Reaction actions
+      // ========== REACTION ACTIONS ==========
       addReaction: (chatId, messageId, reaction) => {
         set((state) => {
           const chatMessages = state.messages.get(chatId);
@@ -351,10 +355,16 @@ export const useChatStore = create<ChatStore>()(
               chatMessages.map((msg) => {
                 if (msg.id === messageId) {
                   const existingReactions = msg.reactions || [];
-                  return {
-                    ...msg,
-                    reactions: [...existingReactions, reaction],
-                  };
+                  const existingIndex = existingReactions.findIndex(
+                    (r) => r.user === reaction.user && r.emoji === reaction.emoji
+                  );
+                  
+                  if (existingIndex >= 0) {
+                    const updatedReactions = [...existingReactions];
+                    updatedReactions[existingIndex] = reaction;
+                    return { ...msg, reactions: updatedReactions };
+                  }
+                  return { ...msg, reactions: [...existingReactions, reaction] };
                 }
                 return msg;
               }),
@@ -374,10 +384,7 @@ export const useChatStore = create<ChatStore>()(
               chatMessages.map((msg) => {
                 if (msg.id === messageId) {
                   const reactions = msg.reactions || [];
-                  return {
-                    ...msg,
-                    reactions: reactions.filter((r) => r.user.id !== userId),
-                  };
+                  return { ...msg, reactions: reactions.filter((r) => r.user !== userId) };
                 }
                 return msg;
               }),
@@ -386,7 +393,7 @@ export const useChatStore = create<ChatStore>()(
         });
       },
       
-      // Message status
+      // ========== MESSAGE STATUS ACTIONS ==========
       updateMessageStatus: (chatId, messageId, status, userId) => {
         set((state) => {
           const chatMessages = state.messages.get(chatId);
@@ -397,12 +404,31 @@ export const useChatStore = create<ChatStore>()(
               chatId,
               chatMessages.map((msg) => {
                 if (msg.id === messageId) {
-                  return {
-                    ...msg,
-                    statuses: (msg.statuses || []).map((s) =>
-                      s.user.id === userId ? { ...s, status } : s
-                    ),
-                  };
+                  const existingStatuses = msg.statuses || [];
+                  const existingIndex = existingStatuses.findIndex((s) => s.user === userId);
+                  
+                  let updatedStatuses;
+                  if (existingIndex >= 0) {
+                    updatedStatuses = [...existingStatuses];
+                    updatedStatuses[existingIndex] = {
+                      ...updatedStatuses[existingIndex],
+                      status,
+                      ...(status === 'delivered' ? { delivered_at: new Date().toISOString() } : {}),
+                      ...(status === 'read' ? { read_at: new Date().toISOString() } : {}),
+                      updated_at: new Date().toISOString(),
+                    };
+                  } else {
+                    const newStatus: MessageStatus = {
+                      id: Date.now(),
+                      message: messageId,
+                      user: userId,
+                      status,
+                      updated_at: new Date().toISOString(),
+                    };
+                    updatedStatuses = [...existingStatuses, newStatus];
+                  }
+                  
+                  return { ...msg, statuses: updatedStatuses };
                 }
                 return msg;
               }),
@@ -413,16 +439,24 @@ export const useChatStore = create<ChatStore>()(
       
       markAllAsRead: async (chatId) => {
         try {
-          await messageService.markAllAsRead(chatId);
-          
-          // Update local state
+          await chatService.markAllAsRead(chatId);
           get().resetUnreadCount(chatId);
+          
+          const currentUser = useAuthStore.getState().user;
+          if (currentUser) {
+            const chatMessages = get().messages.get(chatId) || [];
+            chatMessages.forEach((message) => {
+              if (message.sender !== currentUser.id) {
+                get().updateMessageStatus(chatId, message.id, 'read', currentUser.id);
+              }
+            });
+          }
         } catch (error) {
           console.error('Failed to mark all as read:', error);
         }
       },
       
-      // Unread counts
+      // ========== UNREAD COUNTS ==========
       fetchUnreadCounts: async () => {
         try {
           const counts = await chatService.getUnreadCounts();
@@ -430,7 +464,7 @@ export const useChatStore = create<ChatStore>()(
           set((state) => {
             const newCounts = new Map(state.unreadCounts);
             Object.entries(counts).forEach(([chatId, count]) => {
-              newCounts.set(chatId, count);
+              newCounts.set(parseInt(chatId), count);
             });
             return { unreadCounts: newCounts };
           });
@@ -449,10 +483,7 @@ export const useChatStore = create<ChatStore>()(
         set((state) => {
           const currentCount = state.unreadCounts.get(chatId) || 0;
           return {
-            unreadCounts: new Map(state.unreadCounts).set(
-              chatId,
-              currentCount + 1
-            ),
+            unreadCounts: new Map(state.unreadCounts).set(chatId, currentCount + 1),
           };
         });
       },
@@ -463,16 +494,13 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
       
-      // Participants
+      // ========== PARTICIPANT ACTIONS ==========
       addParticipant: (chatId, user) => {
         set((state) => ({
           chats: state.chats.map((chat) => {
             if (chat.id === chatId) {
-              const participants = chat.participants || [];
-              return {
-                ...chat,
-                participants: [...participants, user],
-              };
+              const participants = (chat as any).participants_info || [];
+              return { ...chat, participants_info: [...participants, user] };
             }
             return chat;
           }),
@@ -483,10 +511,10 @@ export const useChatStore = create<ChatStore>()(
         set((state) => ({
           chats: state.chats.map((chat) => {
             if (chat.id === chatId) {
-              const participants = chat.participants || [];
+              const participants = (chat as any).participants_info || [];
               return {
                 ...chat,
-                participants: participants.filter((p) => p.id !== userId),
+                participants_info: participants.filter((p: any) => p.id !== userId),
               };
             }
             return chat;
@@ -494,11 +522,15 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
       
-      // Typing indicators
+      // ========== TYPING INDICATORS ==========
       setTypingUser: (chatId, userId) => {
         set((state) => {
           const typingSet = state.typingUsers.get(chatId) || new Set();
           typingSet.add(userId);
+          
+          setTimeout(() => {
+            get().clearTypingUser(chatId, userId);
+          }, 3000);
           
           return {
             typingUsers: new Map(state.typingUsers).set(chatId, typingSet),
@@ -512,34 +544,27 @@ export const useChatStore = create<ChatStore>()(
           if (!typingSet) return state;
           
           typingSet.delete(userId);
-          
           return {
             typingUsers: new Map(state.typingUsers).set(chatId, typingSet),
           };
         });
       },
       
-      // User status
+      // ========== USER STATUS ==========
       updateUserStatus: (userId, is_online, last_seen) => {
         set((state) => ({
-          onlineUsers: new Map(state.onlineUsers).set(userId, {
-            is_online,
-            last_seen,
-          }),
+          onlineUsers: new Map(state.onlineUsers).set(userId, { is_online, last_seen }),
         }));
       },
       
-      // Search
+      // ========== SEARCH ==========
       searchMessages: async (query, chatId) => {
         set({ isLoading: true, error: null });
         
         try {
           const response = await chatService.searchMessages(query, chatId);
           set({ isLoading: false });
-          if (response && typeof response === 'object' && 'results' in response) {
-            return (response as { results?: Message[] }).results || [];
-          }
-          return [];
+          return response.results || [];
         } catch (error: any) {
           set({
             error: error.response?.data?.error || 'Search failed',
@@ -549,26 +574,44 @@ export const useChatStore = create<ChatStore>()(
         }
       },
       
-      // UI State
+      // ========== UI STATE ==========
       setLoading: (loading) => set({ isLoading: loading }),
       setSending: (sending) => set({ isSending: sending }),
       setError: (error) => set({ error }),
       clearError: () => set({ error: null }),
+      
+      // ========== HELPER GETTERS ==========
+      getChatById: (chatId) => {
+        return get().chats.find(chat => chat.id === chatId);
+      },
+      
+      getUnreadTotal: () => {
+        let total = 0;
+        get().unreadCounts.forEach((count) => {
+          total += count;
+        });
+        return total;
+      },
+      
+      hasUnreadMessages: (chatId) => {
+        return (get().unreadCounts.get(chatId) || 0) > 0;
+      },
     }),
     { name: 'chat-store' }
   )
 );
 
-// Selectors for better performance
+// ========== SELECTORS ==========
 export const useChats = () => useChatStore((state) => state.chats);
 export const useCurrentChat = () => useChatStore((state) => state.currentChat);
-export const useChatMessages = (chatId: string) =>
+export const useChatMessages = (chatId: number) =>
   useChatStore((state) => state.messages.get(chatId) || []);
-export const useUnreadCount = (chatId: string) =>
+export const useUnreadCount = (chatId: number) =>
   useChatStore((state) => state.unreadCounts.get(chatId) || 0);
-export const useTypingUsers = (chatId: string) =>
+export const useTypingUsers = (chatId: number) =>
   useChatStore((state) => state.typingUsers.get(chatId) || new Set());
 export const useUserStatus = (userId: number) =>
   useChatStore((state) => state.onlineUsers.get(userId) || { is_online: false });
 export const useChatLoading = () => useChatStore((state) => state.isLoading);
 export const useChatError = () => useChatStore((state) => state.error);
+export const useUnreadTotal = () => useChatStore((state) => state.getUnreadTotal());

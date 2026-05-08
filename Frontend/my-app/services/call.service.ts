@@ -1,57 +1,65 @@
+// services/call.service.ts
 import { api } from './api';
-import type { Call, CallCreateData, CallParticipant } from '@/types/call.types';
+import type { Call, CallCreateData, CallParticipant, CallQuality } from '@/types/call.types';
 
 export const callService = {
   // Call management
   async createCall(data: CallCreateData): Promise<Call> {
-    return api.post<Call>('/calls/create/', data);
+    return await api.post<Call>('/calls/', data);
   },
 
-  async joinCall(callId: string): Promise<CallParticipant> {
-    return api.post<CallParticipant>(`/calls/${callId}/join/`);
+  async getCall(callId: number): Promise<Call> {
+    return await api.get<Call>(`/calls/${callId}/`);
   },
 
-  async leaveCall(callId: string): Promise<void> {
-    await api.post(`/calls/${callId}/leave/`);
+  async updateCall(callId: number, data: { status: string }): Promise<Call> {
+    return await api.patch<Call>(`/calls/${callId}/`, data);
   },
 
-  async endCall(callId: string): Promise<Call> {
-    return api.post<Call>(`/calls/${callId}/end/`);
+  async joinCall(callId: number, enableVideo: boolean = true): Promise<CallParticipant> {
+    return await api.post<CallParticipant>(`/calls/${callId}/join/`, { enable_video: enableVideo });
+  },
+
+  async leaveCall(callId: number): Promise<{ status: string }> {
+    return await api.post<{ status: string }>(`/calls/${callId}/leave/`);
+  },
+
+  async endCall(callId: number): Promise<Call> {
+    return await api.post<Call>(`/calls/${callId}/end/`);
   },
 
   // Call controls
-  async toggleMute(callId: string): Promise<CallParticipant> {
-    return api.post<CallParticipant>(`/calls/${callId}/toggle-mute/`);
+  async toggleMute(callId: number): Promise<CallParticipant> {
+    return await api.post<CallParticipant>(`/calls/${callId}/toggle-mute/`);
   },
 
-  async toggleVideo(callId: string): Promise<CallParticipant> {
-    return api.post<CallParticipant>(`/calls/${callId}/toggle-video/`);
+  async toggleVideo(callId: number): Promise<CallParticipant> {
+    return await api.post<CallParticipant>(`/calls/${callId}/toggle-video/`);
   },
 
   // Call info
-  async getCall(callId: string): Promise<Call> {
-    return api.get<Call>(`/calls/${callId}/`);
-  },
-
-  async getCallParticipants(callId: string): Promise<CallParticipant[]> {
-    return api.get<CallParticipant[]>(`/calls/${callId}/participants/`);
+  async getCallParticipants(callId: number): Promise<CallParticipant[]> {
+    return await api.get<CallParticipant[]>(`/calls/${callId}/participants/`);
   },
 
   async getActiveCalls(): Promise<Call[]> {
-    return api.get<Call[]>('/calls/active/');
+    return await api.get<Call[]>('/calls/active/');
+  },
+
+  async getUserCalls(): Promise<Call[]> {
+    return await api.get<Call[]>('/calls/');
   },
 
   // Call quality
-  async logCallQuality(callId: string, data: any): Promise<void> {
-    await api.post(`/calls/${callId}/quality/`, data);
+  async logCallQuality(callId: number, data: Partial<CallQuality>): Promise<CallQuality> {
+    return await api.post<CallQuality>(`/calls/${callId}/quality/log/`, data);
   },
 
-  async getCallQualityReport(callId: string): Promise<any> {
-    return api.get(`/calls/${callId}/quality-report/`);
+  async getCallQualityLogs(callId: number): Promise<CallQuality[]> {
+    return await api.get<CallQuality[]>(`/calls/${callId}/quality/logs/`);
   },
 
-  // Statistics
-  async getUserStatistics(): Promise<any> {
-    return api.get('/statistics/');
+  async getCallQualityReport(callId: number): Promise<any> {
+    return await api.get<any>(`/calls/${callId}/quality/report/`);
   },
 };

@@ -1,74 +1,124 @@
+// services/auth.service.ts
 import { api } from './api';
-import type { User } from '@/types/user.types.ts';
+import type { User } from '@/types/user.types';
 
-interface LoginCredentials {
-  username: string;
-  password: string;
-}
-
-interface RegisterData extends LoginCredentials {
-  email: string;
-  first_name?: string;
-  last_name?: string;
-}
-
-interface AuthResponse {
+export interface LoginResponse {
   token: string;
   user: User;
+  user_id: number;
 }
 
-interface WebSocketToken {
+export interface RegisterResponse {
+  message: string;
+  user_id: number;
+  email: string;
+}
+
+export interface VerifyEmailResponse {
+  status: string;
+  token?: string;
+  user?: User;
+}
+
+export interface WebSocketTokenResponse {
   token: string;
   user_id: number;
-  username: string;
+  username?: string;
 }
 
-export const authService = {
-  // Authentication
-  async register(data: RegisterData): Promise<AuthResponse> {
-    return api.post<AuthResponse>('/register/', data);
-  },
+export interface UserOnlineStatus {
+  is_online: boolean;
+  last_seen?: string;
+  status?: string;
+  privacy?: string;
+}
 
-  async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    return api.post<AuthResponse>('/login/', credentials);
-  },
+export interface PasswordResetResponse {
+  status: string;
+}
+
+class AuthService {
+  private readonly baseUrl = '';
+
+  async login(credentials: { username: string; password: string }): Promise<LoginResponse> {
+    return await api.post<LoginResponse>(`/auth/login/`, credentials);
+  }
+
+  async register(data: {
+    username: string;
+    email: string;
+    password: string;
+    confirm_password: string;
+    first_name?: string;
+    last_name?: string;
+    bio?: string;
+    phone_number?: string;
+  }): Promise<RegisterResponse> {
+    return await api.post<RegisterResponse>(`/auth/register/`, data);
+  }
 
   async logout(): Promise<void> {
-    await api.post('/logout/');
-    api.clearToken();
-  },
+    try {
+      await api.post(`/auth/logout/`);
+    } finally {
+      // Clear storage
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('auth-storage');
+        localStorage.removeItem('token');
+      }
+    }
+  }
 
-  // Current user
-  async getCurrentUser(): Promise<User> {
-    return api.get<User>('/users/me/');
-  },
+  async verifyEmail(data: { email: string; verification_code: string }): Promise<VerifyEmailResponse> {
+    return await api.post<VerifyEmailResponse>(`/auth/verify-email/`, data);
+  }
 
-  async updateProfile(data: Partial<User>): Promise<User> {
-    return api.put<User>('/users/me/update/', data);
-  },
+  async resendVerificationCode(email: string): Promise<{ message: string }> {
+    return await api.post<{ message: string }>(`/auth/resend-verification/`, { email });
+  }
 
-  // WebSocket token
-  async getWebSocketToken(): Promise<WebSocketToken> {
-    return api.get<WebSocketToken>('/websocket-token/');
-  },
+  async requestPasswordReset(email: string): Promise<PasswordResetResponse> {
+    return await api.post<PasswordResetResponse>(`/auth/password-reset-request/`, { email });
+  }
 
-  // User status
-  async updateLastSeen(): Promise<void> {
-    await api.post('/update-last-seen/');
-  },
+  async resetPassword(data: { 
+    reset_token: string; 
+    new_password: string; 
+    confirm_password: string;
+  }): Promise<PasswordResetResponse> {
+    return await api.post<PasswordResetResponse>(`/auth/password-reset-confirm/`, data);
+  }
 
-  async setOffline(): Promise<void> {
-    await api.post('/set-offline/');
-  },
+  async updateProfile(data: FormData | Partial<User>): Promise<User> {
+    const isFormData = data instanceof FormData;
+    const config = isFormData ? { headers: { 'Content-Type': 'multipart/form-data' } } : undefined;
+    return await api.patch<User>(`/users/me/update/`, data, config);
+  }
 
-  async getUserOnlineStatus(userId: number) {
-    return api.get(`/users/${userId}/online-status/`);
-  },
+  async updateLastSeen(): Promise<{ status: string }> {
+    return await api.post<{ status: string }>(`/users/me/update-last-seen/`);
+  }
 
-  // User search
-  async searchUsers(query: string, page = 1) {
-    return api.get('/users/search/', {
-      params: { q: query, page },
-    });
-  },
-};
+  async setOffline(): Promise<{ status: string }> {
+    return await api.post<{ status: string }>(`/users/me/set-offline/`);
+  }
+
+  async getWebSocketToken(): Promise<WebSocketTokenResponse> {
+    return await api.get<WebSocketTokenResponse>(`/auth/websocket-token/`);
+  }
+
+  async getUserProfile(userId?: number): Promise<User> {
+    const url = userId ? `/users/${userId}/` : '/users/me/';
+    return await api.get<User>(url);
+  }
+
+  async searchUsers(query: string): Promise<User[]> {
+    return await api.get<User[]>(`/users/search/`, { params: { q: query } });
+  }
+
+  async getUserOnlineStatus(userId: number): Promise<UserOnlineStatus> {
+    return await api.get<UserOnlineStatus>(`/users/${userId}/online-status/`);
+  }
+}
+
+export const authService = new AuthService();

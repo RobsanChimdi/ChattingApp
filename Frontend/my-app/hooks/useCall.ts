@@ -1,8 +1,10 @@
+// hooks/useCall.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useCallStore } from '@/store/callStore';
+import { useCallStore } from '@/store/callStore'; // FIXED import
 import { useAuth } from './useAuth';
 import { useSocket } from './useSocket';
+import { useWebRTC } from './useWebRTC';
 import type { Call, CallParticipant, WebRTCSignal } from '@/types';
 
 interface UseCallReturn {
@@ -11,7 +13,7 @@ interface UseCallReturn {
   incomingCall: Call | null;
   participants: CallParticipant[];
   localStream: MediaStream | null;
-  remoteStreams: Map<string, MediaStream>;
+  remoteStreams: Map<number, MediaStream>;
   isCallActive: boolean;
   isJoining: boolean;
   isMuted: boolean;
@@ -21,8 +23,8 @@ interface UseCallReturn {
   callStats: any;
   
   // Call management
-  initiateCall: (chatId: string, callType: 'audio' | 'video') => Promise<Call>;
-  joinCall: (callId: string) => Promise<void>;
+  initiateCall: (chatId: number, callType: 'audio' | 'video') => Promise<Call>;
+  joinCall: (callId: number) => Promise<void>;
   answerCall: () => Promise<void>;
   rejectCall: () => Promise<void>;
   leaveCall: () => Promise<void>;
@@ -54,7 +56,7 @@ interface UseCallReturn {
   getParticipant: (userId: number) => CallParticipant | undefined;
 }
 
-export const useCall = (callId?: string): UseCallReturn => {
+export const useCall = (callId?: number): UseCallReturn => {
   const router = useRouter();
   const { user } = useAuth();
   const { on, emit } = useSocket();
@@ -83,10 +85,12 @@ export const useCall = (callId?: string): UseCallReturn => {
     clearError: clearStoreError,
   } = useCallStore();
   
+  // Initialize WebRTC hook
+  const webRTC = useWebRTC(callId);
+  
   // Local state
   const [localError, setLocalError] = useState<string | null>(null);
   const [callStats, setCallStats] = useState<any>(null);
-  const [activeSpeaker, setActiveSpeaker] = useState<number | null>(null);
   const qualityMonitorRef = useRef<NodeJS.Timeout | null>(null);
   
   // Combined error state
@@ -95,20 +99,28 @@ export const useCall = (callId?: string): UseCallReturn => {
   // Get participants for current call
   const participants = activeCall ? storeParticipants.get(activeCall.id) || [] : [];
   
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (qualityMonitorRef.current) {
+        clearInterval(qualityMonitorRef.current);
+        qualityMonitorRef.current = null;
+      }
+      stopRingtone();
+      webRTC.cleanup();
+    };
+  }, [webRTC]);
+
   // Setup socket listeners
   useEffect(() => {
-    // Listen for incoming calls
     const unsubscribeIncomingCall = on('incoming_call', (data: { call: Call }) => {
-      if (data.call.initiated_by.id !== user?.id) {
+      if (data.call.initiated_by !== user?.id) {
         setIncomingCall(data.call);
-        
-        // Play ringtone
         playRingtone();
       }
     });
     
-    // Listen for call ended
-    const unsubscribeCallEnded = on('call_ended', (data: { call_id: string; reason: string }) => {
+    const unsubscribeCallEnded = on('call_ended', (data: { call_id: number; reason: string }) => {
       if (activeCall?.id === data.call_id) {
         handleCallEnded(data.reason);
       }
@@ -118,19 +130,17 @@ export const useCall = (callId?: string): UseCallReturn => {
       }
     });
     
-    // Listen for participant updates
     const unsubscribeParticipantUpdate = on('participant_updated', 
-      (data: { call_id: string; participant: CallParticipant }) => {
+      (data: { call_id: number; participant: CallParticipant }) => {
         if (activeCall?.id === data.call_id) {
-          // Update participant in local state if needed
+          useCallStore.getState().updateParticipant(data.call_id, data.participant.user.id, data.participant);
         }
       }
     );
     
-    // Listen for WebRTC signals
     const unsubscribeWebRTCSignal = on('webrtc_signal', (signal: WebRTCSignal) => {
       if (activeCall?.id === signal.callId) {
-        handleWebRTCSignal(signal);
+        webRTC.sendWebRTCSignal(signal);
       }
     });
     
@@ -139,15 +149,11 @@ export const useCall = (callId?: string): UseCallReturn => {
       unsubscribeCallEnded();
       unsubscribeParticipantUpdate();
       unsubscribeWebRTCSignal();
-      
-      // Stop quality monitoring
       stopQualityMonitoring();
-      
-      // Stop ringtone if playing
       stopRingtone();
     };
-  }, [activeCall?.id, incomingCall?.id, user?.id, on, setIncomingCall]);
-  
+  }, [activeCall?.id, incomingCall?.id, user?.id, on, webRTC]);
+
   // Auto-join call if callId provided and not in call
   useEffect(() => {
     if (callId && !activeCall && !isCallActive && user) {
@@ -155,50 +161,49 @@ export const useCall = (callId?: string): UseCallReturn => {
     }
   }, [callId, activeCall, isCallActive, user]);
   
+  // Initialize WebRTC when call becomes active
+  useEffect(() => {
+    if (activeCall && callId === activeCall.id && localStream) {
+      activeCall.participants?.forEach((participant) => {
+        if (participant.user.id !== user?.id) {
+          webRTC.addRemoteParticipant(participant.user.id).catch(console.error);
+        }
+      });
+    }
+  }, [activeCall, callId, localStream, user?.id, webRTC]);
+  
   // Handle call ended
   const handleCallEnded = useCallback((reason: string) => {
-    leaveCallAction(activeCall!.id).catch(console.error);
-    
-    // Show call ended message
+    if (activeCall) {
+      leaveCallAction(activeCall.id).catch(console.error);
+    }
+    webRTC.cleanup();
     setLocalError(`Call ended: ${reason}`);
     
-    // Navigate back to chat after delay
     setTimeout(() => {
       if (activeCall?.chat) {
         router.push(`/chat/${activeCall.chat}`);
       }
     }, 2000);
-  }, [activeCall, leaveCallAction, router]);
-  
-  // Handle WebRTC signal
-  const handleWebRTCSignal = useCallback((signal: WebRTCSignal) => {
-    // Forward to WebRTC service
-    emit('webrtc_signal', signal);
-  }, [emit]);
+  }, [activeCall, leaveCallAction, router, webRTC]);
   
   // Enhanced actions
-  const initiateCall = useCallback(async (chatId: string, callType: 'audio' | 'video') => {
+  const initiateCall = useCallback(async (chatId: number, callType: 'audio' | 'video') => {
     try {
       const call = await initiateCallAction(chatId, callType);
-      
-      // Start quality monitoring
       startQualityMonitoring();
-      
+      await webRTC.initLocalStream(callType === 'video');
       return call;
     } catch (error: any) {
       setLocalError(error.message || 'Failed to initiate call');
       throw error;
     }
-  }, [initiateCallAction]);
+  }, [initiateCallAction, webRTC]);
   
-  const joinCall = useCallback(async (callId: string) => {
+  const joinCall = useCallback(async (callId: number) => {
     try {
       await joinCallAction(callId);
-      
-      // Start quality monitoring
       startQualityMonitoring();
-      
-      // Stop ringtone if we were answering
       stopRingtone();
     } catch (error: any) {
       setLocalError(error.message || 'Failed to join call');
@@ -208,10 +213,10 @@ export const useCall = (callId?: string): UseCallReturn => {
   
   const answerCall = useCallback(async () => {
     if (!incomingCall) return;
-    
     try {
       await joinCall(incomingCall.id);
       setIncomingCall(null);
+      stopRingtone();
     } catch (error) {
       setLocalError('Failed to answer call');
     }
@@ -219,7 +224,6 @@ export const useCall = (callId?: string): UseCallReturn => {
   
   const rejectCall = useCallback(async () => {
     if (!incomingCall) return;
-    
     try {
       emit('reject_call', { call_id: incomingCall.id });
       setIncomingCall(null);
@@ -231,149 +235,82 @@ export const useCall = (callId?: string): UseCallReturn => {
   
   const leaveCall = useCallback(async () => {
     if (!activeCall) return;
-    
     try {
       await leaveCallAction(activeCall.id);
       stopQualityMonitoring();
-      
-      // Navigate back to chat
+      stopRingtone();
+      webRTC.cleanup();
       if (activeCall.chat) {
         router.push(`/chat/${activeCall.chat}`);
       }
     } catch (error: any) {
       setLocalError(error.message || 'Failed to leave call');
     }
-  }, [activeCall, leaveCallAction, router]);
+  }, [activeCall, leaveCallAction, router, webRTC]);
   
   const endCall = useCallback(async () => {
     if (!activeCall) return;
-    
     try {
       await endCallAction(activeCall.id);
       stopQualityMonitoring();
-      
-      // Navigate back to chat
+      stopRingtone();
+      webRTC.cleanup();
       if (activeCall.chat) {
         router.push(`/chat/${activeCall.chat}`);
       }
     } catch (error: any) {
       setLocalError(error.message || 'Failed to end call');
     }
-  }, [activeCall, endCallAction, router]);
+  }, [activeCall, endCallAction, router, webRTC]);
   
-  // Media controls
+  // Media controls - INTEGRATED with WebRTC
   const toggleMute = useCallback(() => {
-    try {
-      toggleMuteAction();
-    } catch (error: any) {
-      setLocalError('Failed to toggle mute');
-    }
-  }, [toggleMuteAction]);
+    webRTC.toggleAudio(isMuted);
+    toggleMuteAction();
+  }, [isMuted, webRTC, toggleMuteAction]);
   
   const toggleVideo = useCallback(() => {
-    try {
-      toggleVideoAction();
-    } catch (error: any) {
-      setLocalError('Failed to toggle video');
-    }
-  }, [toggleVideoAction]);
+    webRTC.toggleVideo(!hasVideo);
+    toggleVideoAction();
+  }, [hasVideo, webRTC, toggleVideoAction]);
   
   const switchCamera = useCallback(async () => {
-    if (!localStream || !activeCall || activeCall.call_type !== 'video') {
-      return;
-    }
-    
+    if (!activeCall || activeCall.call_type !== 'video') return;
     try {
-      const videoTrack = localStream.getVideoTracks()[0];
-      if (!videoTrack) return;
-      
-      // Get all video devices
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      
-      if (videoDevices.length < 2) {
-        setLocalError('Only one camera available');
-        return;
-      }
-      
-      // Find current device
-      const currentDeviceId = videoTrack.getSettings().deviceId;
-      const otherDevice = videoDevices.find(device => device.deviceId !== currentDeviceId);
-      
-      if (!otherDevice) {
-        setLocalError('Could not find another camera');
-        return;
-      }
-      
-      // Create new stream with other camera
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: otherDevice.deviceId } },
-        audio: true,
-      });
-      
-      // Replace video track
-      const newVideoTrack = newStream.getVideoTracks()[0];
-      const sender = getVideoSender();
-      
-      if (sender && typeof sender.replaceTrack === 'function') {
-        sender.replaceTrack(newVideoTrack);
-      }
-      
-      // Update local stream
-      videoTrack.stop();
-      localStream.removeTrack(videoTrack);
-      localStream.addTrack(newVideoTrack);
-      
-      // Cleanup
-      newStream.getAudioTracks().forEach(track => track.stop());
+      await webRTC.switchCamera();
     } catch (error: any) {
       setLocalError('Failed to switch camera');
     }
-  }, [localStream, activeCall]);
+  }, [activeCall, webRTC]);
   
   const toggleSpeaker = useCallback(() => {
-    // This would require access to audio output devices
-    // For now, we'll just toggle a UI state
     console.log('Speaker toggled');
   }, []);
   
   // Participant management
   const kickParticipant = useCallback(async (userId: number) => {
     if (!activeCall || !user) return;
-    
-    // Check permissions
-    const isInitiator = activeCall.initiated_by.id === user.id;
-    const isChatAdmin = false; // Would need to check chat store
-    
-    if (!isInitiator && !isChatAdmin) {
+    const isInitiator = activeCall.initiated_by === user.id;
+    if (!isInitiator) {
       setLocalError('You do not have permission to kick participants');
       return;
     }
-    
     try {
-      emit('kick_participant', {
-        call_id: activeCall.id,
-        user_id: userId,
-      });
+      emit('kick_participant', { call_id: activeCall.id, user_id: userId });
+      webRTC.removeRemoteParticipant(userId);
     } catch (error) {
       setLocalError('Failed to kick participant');
     }
-  }, [activeCall, user, emit]);
+  }, [activeCall, user, emit, webRTC]);
   
   const muteParticipant = useCallback(async (userId: number) => {
     if (!activeCall || !user) return;
-    
-    // Only initiator can mute others
-    if (activeCall.initiated_by.id !== user.id) {
+    if (activeCall.initiated_by !== user.id) {
       setLocalError('Only call initiator can mute participants');
       return;
     }
-    
     try {
-      emit('mute_participant', {
-        call_id: activeCall.id,
-        user_id: userId,
-      });
+      emit('mute_participant', { call_id: activeCall.id, user_id: userId });
     } catch (error) {
       setLocalError('Failed to mute participant');
     }
@@ -382,139 +319,68 @@ export const useCall = (callId?: string): UseCallReturn => {
   // WebRTC signaling
   const sendWebRTCSignal = useCallback((signal: WebRTCSignal) => {
     if (!activeCall) return;
-    
-    emit('webrtc_signal', {
-      ...signal,
-      callId: activeCall.id,
-    });
-  }, [activeCall, emit]);
+    webRTC.sendWebRTCSignal(signal);
+  }, [activeCall, webRTC]);
   
   // Quality monitoring
   const startQualityMonitoring = useCallback(() => {
     if (qualityMonitorRef.current) return;
+    webRTC.startQualityMonitoring();
     
     qualityMonitorRef.current = setInterval(async () => {
-      if (!activeCall || !localStream) return;
-      
+      if (!activeCall) return;
       try {
-        const stats = await getConnectionStats();
+        const connections = webRTC.getActiveConnections();
+        const stats = { audioLevel: 0, videoBitrate: 0, audioBitrate: 0, packetLoss: 0, jitter: 0, roundTripTime: 0 };
         setCallStats(stats);
-        
-        // Log quality if stats are poor
         if (stats.packetLoss > 0.1 || stats.jitter > 50) {
           useCallStore.getState().logCallQuality(activeCall.id, stats);
         }
       } catch (error) {
         console.error('Failed to get connection stats:', error);
       }
-    }, 5000); // Every 5 seconds
-  }, [activeCall, localStream]);
+    }, 5000);
+  }, [activeCall, webRTC]);
   
   const stopQualityMonitoring = useCallback(() => {
     if (qualityMonitorRef.current) {
       clearInterval(qualityMonitorRef.current);
       qualityMonitorRef.current = null;
     }
+    webRTC.stopQualityMonitoring();
     setCallStats(null);
-  }, []);
+  }, [webRTC]);
   
   // Helper functions
-  const isInitiator = !!activeCall && !!user && activeCall.initiated_by.id === user.id;
-  
-  const isParticipant = useCallback((userId: number) => {
-    return participants.some(p => p.user.id === userId);
-  }, [participants]);
-  
-  const getParticipant = useCallback((userId: number) => {
-    return participants.find(p => p.user.id === userId);
-  }, [participants]);
-  
-  const clearError = useCallback(() => {
-    setLocalError(null);
-    clearStoreError();
-  }, [clearStoreError]);
+  const isInitiator = !!activeCall && !!user && activeCall.initiated_by === user.id;
+  const isParticipant = useCallback((userId: number) => participants.some(p => p.user.id === userId), [participants]);
+  const getParticipant = useCallback((userId: number) => participants.find(p => p.user.id === userId), [participants]);
+  const clearError = useCallback(() => { setLocalError(null); clearStoreError(); }, [clearStoreError]);
   
   // Audio helpers
+  let ringtoneAudio: HTMLAudioElement | null = null;
   const playRingtone = () => {
-    const audio = new Audio('/sounds/ringtone.mp3');
-    audio.loop = true;
-    audio.play().catch(console.error);
-    (window as any).ringtoneAudio = audio;
+    try {
+      if (!ringtoneAudio) { ringtoneAudio = new Audio('/sounds/ringtone.mp3'); }
+      ringtoneAudio.loop = true;
+      ringtoneAudio.volume = 0.7;
+      ringtoneAudio.play().catch(() => {});
+    } catch (error) { console.error('Failed to play ringtone:', error); }
   };
-  
   const stopRingtone = () => {
-    const audio = (window as any).ringtoneAudio;
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-    }
-  };
-  
-  // WebRTC helper
-  const getVideoSender = (): RTCRtpSender | null => {
-    // This would be implemented with the WebRTC service
-    return null;
-  };
-  
-  const getConnectionStats = async () => {
-    // This would be implemented with the WebRTC service
-    return {
-      audioLevel: 0,
-      videoBitrate: 0,
-      audioBitrate: 0,
-      packetLoss: 0,
-      jitter: 0,
-      roundTripTime: 0,
-    };
+    if (ringtoneAudio) { ringtoneAudio.pause(); ringtoneAudio.currentTime = 0; ringtoneAudio = null; }
   };
   
   return {
-    // State
-    activeCall,
-    incomingCall,
-    participants,
-    localStream,
-    remoteStreams,
-    isCallActive,
-    isJoining,
-    isMuted,
-    hasVideo,
-    isLoading,
-    error,
-    callStats,
-    
-    // Call management
-    initiateCall,
-    joinCall,
-    answerCall,
-    rejectCall,
-    leaveCall,
-    endCall,
-    
-    // Media controls
-    toggleMute,
-    toggleVideo,
-    switchCamera,
-    toggleSpeaker,
-    
-    // Participant management
-    kickParticipant,
-    muteParticipant,
-    
-    // WebRTC
+    activeCall, incomingCall, participants, localStream, remoteStreams,
+    isCallActive, isJoining, isMuted, hasVideo, isLoading, error, callStats,
+    initiateCall, joinCall, answerCall, rejectCall, leaveCall, endCall,
+    toggleMute, toggleVideo, switchCamera, toggleSpeaker,
+    kickParticipant, muteParticipant,
     sendWebRTCSignal,
-    
-    // Quality monitoring
-    startQualityMonitoring,
-    stopQualityMonitoring,
-    
-    // UI State
+    startQualityMonitoring, stopQualityMonitoring,
     clearError,
-    
-    // Helpers
-    isInitiator,
-    isParticipant,
-    getParticipant,
+    isInitiator, isParticipant, getParticipant,
   };
 };
 
@@ -524,14 +390,12 @@ export const useCallState = () => {
   const isCallActive = useCallStore((state) => state.isCallActive);
   const isMuted = useCallStore((state) => state.isMuted);
   const hasVideo = useCallStore((state) => state.hasVideo);
-  
   return { activeCall, isCallActive, isMuted, hasVideo };
 };
 
-export const useCallParticipants = (callId: string) => {
+export const useCallParticipants = (callId: number) => {
   const participants = useCallStore((state) => state.participants.get(callId) || []);
   const localStream = useCallStore((state) => state.localStream);
   const remoteStreams = useCallStore((state) => state.remoteStreams);
-  
   return { participants, localStream, remoteStreams };
 };

@@ -65,9 +65,9 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
   const getChatAvatar = () => {
     if (chat.chat_type === 'private') {
       const otherUser = chat.participants.find(p => p.id !== user?.id);
-      return otherUser?.profile_image;
+      return otherUser?.profile_image|| undefined;
     }
-    return chat.icon;
+    return chat.avatar || undefined;
   };
 
   const getStatusText = () => {

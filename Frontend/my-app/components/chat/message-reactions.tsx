@@ -6,18 +6,18 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { 
-  Smile, 
-  Heart, 
-  ThumbsUp, 
-  Laugh, 
-  Sad, 
-  Angry, 
-  Wow,
+import {
+  Smile,
+  Heart,
+  ThumbsUp,
+  Laugh,
+  Frown,
+  Angry,
   X,
   Plus
 } from 'lucide-react';
-import { useMessages } from '@/hooks/useMessages';
+
+import { useMessages } from '@/hooks/useMessage';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 import type { Message, MessageReaction as MessageReactionType } from '@/types';
@@ -33,8 +33,7 @@ const COMMON_REACTIONS = [
   { emoji: '👍', label: 'Like', icon: ThumbsUp },
   { emoji: '❤️', label: 'Love', icon: Heart },
   { emoji: '😂', label: 'Laugh', icon: Laugh },
-  { emoji: '😮', label: 'Wow', icon: Wow },
-  { emoji: '😢', label: 'Sad', icon: Sad },
+  { emoji: '😢', label: 'Sad', icon: Frown },
   { emoji: '😠', label: 'Angry', icon: Angry },
 ];
 

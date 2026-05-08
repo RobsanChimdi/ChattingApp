@@ -1,4 +1,8 @@
-import { User, Chat, Message, Call, CallParticipant, CallQuality } from './index';
+// store.types.ts
+import { User } from './user.types';
+import { Chat, ChatListItem } from './chat.types';
+import { Message } from './message.types';
+import { Call, CallParticipant, CallQuality } from './call.types';
 
 // Auth Store
 export interface AuthState {
@@ -11,11 +15,11 @@ export interface AuthState {
 
 // Chat Store
 export interface ChatState {
-  chats: Chat[];
+  chats: ChatListItem[];
   currentChat: Chat | null;
-  messages: Map<string, Message[]>;
-  unreadCounts: Map<string, number>;
-  typingUsers: Map<string, Set<number>>;
+  messages: Map<number, Message[]>;
+  unreadCounts: Map<number, number>;
+  typingUsers: Map<number, Set<number>>;
   onlineUsers: Map<number, { is_online: boolean; last_seen?: string }>;
   isLoading: boolean;
   isSending: boolean;
@@ -26,10 +30,10 @@ export interface ChatState {
 export interface CallState {
   activeCall: Call | null;
   incomingCall: Call | null;
-  participants: Map<string, CallParticipant[]>;
+  participants: Map<number, CallParticipant[]>;
   localStream: MediaStream | null;
-  remoteStreams: Map<string, MediaStream>;
-  callQuality: Map<string, CallQuality[]>;
+  remoteStreams: Map<number, MediaStream>;
+  callQuality: Map<number, CallQuality[]>;
   isCallActive: boolean;
   isJoining: boolean;
   isMuted: boolean;
@@ -63,4 +67,12 @@ export interface UIState {
   loading: boolean;
   loadingMessage?: string;
   error: string | null;
+}
+
+// Root Store
+export interface RootState {
+  auth: AuthState;
+  chat: ChatState;
+  call: CallState;
+  ui: UIState;
 }

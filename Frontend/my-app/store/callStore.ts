@@ -1,3 +1,4 @@
+// store/call.store.ts
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { Call, CallParticipant, CallQuality } from '../types/call.types';
@@ -8,10 +9,10 @@ interface CallStore {
   // State
   activeCall: Call | null;
   incomingCall: Call | null;
-  participants: Map<string, CallParticipant[]>; // callId -> participants
+  participants: Map<number, CallParticipant[]>;
   localStream: MediaStream | null;
-  remoteStreams: Map<string, MediaStream>; // userId -> stream
-  callQuality: Map<string, CallQuality[]>; // callId -> quality logs
+  remoteStreams: Map<number, MediaStream>;
+  callQuality: Map<number, CallQuality[]>;
   isCallActive: boolean;
   isJoining: boolean;
   isMuted: boolean;
@@ -20,55 +21,35 @@ interface CallStore {
   error: string | null;
   
   // Actions
-  // Call management
-  initiateCall: (chatId: string, callType: 'audio' | 'video') => Promise<Call>;
-  joinCall: (callId: string) => Promise<void>;
-  leaveCall: (callId: string) => Promise<void>;
-  endCall: (callId: string) => Promise<void>;
+  initiateCall: (chatId: number, callType: 'audio' | 'video') => Promise<Call>;
+  joinCall: (callId: number) => Promise<void>;
+  leaveCall: (callId: number) => Promise<void>;
+  endCall: (callId: number) => Promise<void>;
   setActiveCall: (call: Call | null) => void;
   setIncomingCall: (call: Call | null) => void;
-  
-  // Participant management
-  addParticipant: (callId: string, participant: CallParticipant) => void;
-  removeParticipant: (callId: string, userId: number) => void;
-  updateParticipant: (
-    callId: string,
-    userId: number,
-    updates: Partial<CallParticipant>
-  ) => void;
-  fetchParticipants: (callId: string) => Promise<void>;
-  
-  // Media streams
+  addParticipant: (callId: number, participant: CallParticipant) => void;
+  removeParticipant: (callId: number, userId: number) => void;
+  updateParticipant: (callId: number, userId: number, updates: Partial<CallParticipant>) => void;
+  fetchParticipants: (callId: number) => Promise<void>;
   setLocalStream: (stream: MediaStream | null) => void;
-  addRemoteStream: (userId: string, stream: MediaStream) => void;
-  removeRemoteStream: (userId: string) => void;
-  toggleMute: () => void;
-  toggleVideo: () => void;
+  addRemoteStream: (userId: number, stream: MediaStream) => void;
+  removeRemoteStream: (userId: number) => void;
+  toggleMute: () => Promise<void>;
+  toggleVideo: () => Promise<void>;
   startLocalMedia: (withVideo: boolean) => Promise<void>;
-  
-  // WebRTC
   handleWebRTCSignal: (signal: WebRTCSignal) => void;
-  
-  // Call quality
-  logCallQuality: (callId: string, data: Partial<CallQuality>) => Promise<void>;
-  updateCallQuality: (
-    callId: string,
-    userId: number,
-    quality: Partial<CallQuality>
-  ) => void;
-  
-  // Active calls
+  logCallQuality: (callId: number, data: Partial<CallQuality>) => Promise<void>;
+  updateCallQuality: (callId: number, userId: number, quality: Partial<CallQuality>) => void;
   fetchActiveCalls: () => Promise<Call[]>;
-  
-  // UI State
   setJoining: (joining: boolean) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
-  
-  // Cleanup
   cleanup: () => void;
   cleanupMedia: () => void;
+  // ADD THESE MISSING METHODS
+  setIsMuted: (muted: boolean) => void;
+  setHasVideo: (video: boolean) => void;
 }
 
 export const useCallStore = create<CallStore>()(
@@ -105,17 +86,6 @@ export const useCallStore = create<CallStore>()(
             isLoading: false,
           });
           
-          // Add initiator as participant
-          get().addParticipant(call.id, {
-            id: Date.now().toString(),
-            user: useAuthStore.getState().user!,
-            call: call.id,
-            role: 'initiator',
-            joined_at: new Date().toISOString(),
-            is_muted: false,
-            has_video: callType === 'video',
-          });
-          
           return call;
         } catch (error: any) {
           set({
@@ -131,8 +101,6 @@ export const useCallStore = create<CallStore>()(
         
         try {
           const participant = await callService.joinCall(callId);
-          
-          // Fetch call details
           const call = await callService.getCall(callId);
           
           set({
@@ -141,10 +109,7 @@ export const useCallStore = create<CallStore>()(
             isJoining: false,
           });
           
-          // Add participant
           get().addParticipant(callId, participant);
-          
-          // Start local media stream
           await get().startLocalMedia(call.call_type === 'video');
         } catch (error: any) {
           set({
@@ -158,27 +123,17 @@ export const useCallStore = create<CallStore>()(
       leaveCall: async (callId) => {
         try {
           await callService.leaveCall(callId);
-          
-          set((state) => {
-            const newParticipants = new Map(state.participants);
-            newParticipants.delete(callId);
-            const newCallQuality = new Map(state.callQuality);
-            newCallQuality.delete(callId);
-            return {
-              activeCall: null,
-              incomingCall: null,
-              isCallActive: false,
-              participants: newParticipants,
-              callQuality: newCallQuality,
-            };
-          });
-          
-          // Cleanup media streams
           get().cleanupMedia();
-        } catch (error: any) {
+          
           set({
-            error: error.response?.data?.error || 'Failed to leave call',
+            activeCall: null,
+            incomingCall: null,
+            isCallActive: false,
+            participants: new Map(),
+            callQuality: new Map(),
           });
+        } catch (error: any) {
+          set({ error: error.response?.data?.error || 'Failed to leave call' });
           throw error;
         }
       },
@@ -187,7 +142,8 @@ export const useCallStore = create<CallStore>()(
         set({ isLoading: true, error: null });
         
         try {
-          const call = await callService.endCall(callId);
+          await callService.endCall(callId);
+          get().cleanup();
           
           set({
             activeCall: null,
@@ -195,21 +151,6 @@ export const useCallStore = create<CallStore>()(
             isCallActive: false,
             isLoading: false,
           });
-          
-          // Log call quality before cleanup
-          if (get().localStream) {
-            await get().logCallQuality(callId, {
-              audio_level: 0,
-              video_bitrate: 0,
-              audio_bitrate: 0,
-              packet_loss: 0,
-              jitter: 0,
-              round_trip_time: 0,
-            });
-          }
-          
-          // Cleanup
-          get().cleanup();
         } catch (error: any) {
           set({
             error: error.response?.data?.error || 'Failed to end call',
@@ -219,26 +160,17 @@ export const useCallStore = create<CallStore>()(
         }
       },
       
-      setActiveCall: (call) => {
-        set({
-          activeCall: call,
-          isCallActive: !!call,
-        });
-      },
+      setActiveCall: (call) => set({ activeCall: call, isCallActive: !!call }),
+      setIncomingCall: (call) => set({ incomingCall: call }),
       
-      setIncomingCall: (call) => {
-        set({ incomingCall: call });
-      },
-      
-      // Participant management
       addParticipant: (callId, participant) => {
         set((state) => {
           const callParticipants = state.participants.get(callId) || [];
+          const exists = callParticipants.some((p) => p.user.id === participant.user.id);
+          if (exists) return state;
+          
           return {
-            participants: new Map(state.participants).set(
-              callId,
-              [...callParticipants, participant]
-            ),
+            participants: new Map(state.participants).set(callId, [...callParticipants, participant]),
           };
         });
       },
@@ -276,7 +208,6 @@ export const useCallStore = create<CallStore>()(
       fetchParticipants: async (callId) => {
         try {
           const participants = await callService.getCallParticipants(callId);
-          
           set((state) => ({
             participants: new Map(state.participants).set(callId, participants),
           }));
@@ -285,10 +216,7 @@ export const useCallStore = create<CallStore>()(
         }
       },
       
-      // Media streams
-      setLocalStream: (stream) => {
-        set({ localStream: stream });
-      },
+      setLocalStream: (stream) => set({ localStream: stream }),
       
       addRemoteStream: (userId, stream) => {
         set((state) => ({
@@ -304,7 +232,7 @@ export const useCallStore = create<CallStore>()(
         });
       },
       
-      toggleMute: () => {
+      toggleMute: async () => {
         const { localStream, isMuted, activeCall } = get();
         
         if (localStream && activeCall) {
@@ -312,19 +240,17 @@ export const useCallStore = create<CallStore>()(
             track.enabled = isMuted;
           });
           
-          // Update participant in store
-          get().updateParticipant(activeCall.id, useAuthStore.getState().user!.id, {
-            is_muted: !isMuted,
-          });
-          
-          // Call API to update mute status
-          callService.toggleMute(activeCall.id).catch(console.error);
-          
           set({ isMuted: !isMuted });
+          
+          try {
+            await callService.toggleMute(activeCall.id);
+          } catch (error) {
+            console.error('Failed to toggle mute:', error);
+          }
         }
       },
       
-      toggleVideo: () => {
+      toggleVideo: async () => {
         const { localStream, hasVideo, activeCall } = get();
         
         if (localStream && activeCall && activeCall.call_type === 'video') {
@@ -332,20 +258,17 @@ export const useCallStore = create<CallStore>()(
             track.enabled = !hasVideo;
           });
           
-          // Update participant in store
-          get().updateParticipant(activeCall.id, useAuthStore.getState().user!.id, {
-            has_video: !hasVideo,
-          });
-          
-          // Call API to update video status
-          callService.toggleVideo(activeCall.id).catch(console.error);
-          
           set({ hasVideo: !hasVideo });
+          
+          try {
+            await callService.toggleVideo(activeCall.id);
+          } catch (error) {
+            console.error('Failed to toggle video:', error);
+          }
         }
       },
       
-      // Helper method to start local media
-      startLocalMedia: async (withVideo: boolean) => {
+      startLocalMedia: async (withVideo) => {
         try {
           const constraints: MediaStreamConstraints = {
             audio: true,
@@ -359,21 +282,15 @@ export const useCallStore = create<CallStore>()(
           get().setLocalStream(stream);
           set({ hasVideo: withVideo, isMuted: false });
         } catch (error) {
-          set({
-            error: 'Failed to access media devices. Please check permissions.',
-          });
+          set({ error: 'Failed to access media devices. Please check permissions.' });
           throw error;
         }
       },
       
-      // WebRTC
       handleWebRTCSignal: (signal) => {
-        // This will be implemented with the WebRTC service
         console.log('WebRTC signal received:', signal);
-        // TODO: Implement WebRTC signaling logic
       },
       
-      // Call quality
       logCallQuality: async (callId, data) => {
         try {
           await callService.logCallQuality(callId, data);
@@ -383,7 +300,7 @@ export const useCallStore = create<CallStore>()(
             return {
               callQuality: new Map(state.callQuality).set(callId, [
                 ...qualityLogs,
-                { ...data, timestamp: new Date().toISOString() } as CallQuality,
+                { ...data, measured_at: new Date().toISOString() } as CallQuality,
               ]),
             };
           });
@@ -396,15 +313,11 @@ export const useCallStore = create<CallStore>()(
         set((state) => {
           const qualityLogs = state.callQuality.get(callId) || [];
           return {
-            callQuality: new Map(state.callQuality).set(callId, [
-              ...qualityLogs,
-              { ...quality, timestamp: new Date().toISOString() } as CallQuality,
-            ]),
+            callQuality: new Map(state.callQuality).set(callId, [...qualityLogs, quality as CallQuality]),
           };
         });
       },
       
-      // Active calls
       fetchActiveCalls: async () => {
         try {
           return await callService.getActiveCalls();
@@ -414,22 +327,22 @@ export const useCallStore = create<CallStore>()(
         }
       },
       
-      // UI State
       setJoining: (joining) => set({ isJoining: joining }),
       setLoading: (loading) => set({ isLoading: loading }),
       setError: (error) => set({ error }),
       clearError: () => set({ error: null }),
       
-      // Cleanup
+      // ADD THESE MISSING METHODS
+      setIsMuted: (muted) => set({ isMuted: muted }),
+      setHasVideo: (video) => set({ hasVideo: video }),
+      
       cleanup: () => {
         const { localStream, remoteStreams } = get();
         
-        // Stop local stream
         if (localStream) {
           localStream.getTracks().forEach((track) => track.stop());
         }
         
-        // Stop remote streams
         remoteStreams.forEach((stream) => {
           stream.getTracks().forEach((track) => track.stop());
         });
@@ -440,13 +353,16 @@ export const useCallStore = create<CallStore>()(
           participants: new Map(),
           localStream: null,
           remoteStreams: new Map(),
+          callQuality: new Map(),
           isCallActive: false,
           isMuted: false,
           hasVideo: false,
+          isJoining: false,
+          isLoading: false,
+          error: null,
         });
       },
       
-      // Cleanup media only
       cleanupMedia: () => {
         const { localStream, remoteStreams } = get();
         
@@ -470,13 +386,10 @@ export const useCallStore = create<CallStore>()(
   )
 );
 
-// Import auth store for user reference
-import { useAuthStore } from './authStore';
-
-// Selectors for better performance
+// Selectors
 export const useActiveCall = () => useCallStore((state) => state.activeCall);
 export const useIncomingCall = () => useCallStore((state) => state.incomingCall);
-export const useCallParticipants = (callId: string) =>
+export const useCallParticipants = (callId: number) =>
   useCallStore((state) => state.participants.get(callId) || []);
 export const useLocalStream = () => useCallStore((state) => state.localStream);
 export const useRemoteStreams = () => useCallStore((state) => state.remoteStreams);

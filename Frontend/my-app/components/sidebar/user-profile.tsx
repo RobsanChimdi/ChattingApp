@@ -72,7 +72,7 @@ export function UserProfile({
       <div className="flex flex-col items-center space-y-2">
         <div className="relative">
           <Avatar className="h-10 w-10">
-            <AvatarImage src={user.profile_image} />
+            <AvatarImage src={user.avatar || undefined} />
             <AvatarFallback>
               {user.username?.charAt(0).toUpperCase()}
             </AvatarFallback>
@@ -95,7 +95,7 @@ export function UserProfile({
       <div className="flex items-center space-x-3">
         <div className="relative">
           <Avatar className="h-10 w-10">
-            <AvatarImage src={user.profile_image} />
+            <AvatarImage src={user.avatar || undefined} />
             <AvatarFallback>
               {user.username?.charAt(0).toUpperCase()}
             </AvatarFallback>

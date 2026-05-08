@@ -1,14 +1,13 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+// services/api.ts
+import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig, AxiosError } from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-
-class ApiService {
+class ApiClient {
   private client: AxiosInstance;
-  private token: string | null = null;
 
   constructor() {
     this.client = axios.create({
-      baseURL: API_BASE_URL,
+      baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
+      timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -16,81 +15,96 @@ class ApiService {
 
     // Request interceptor
     this.client.interceptors.request.use(
-      (config) => {
-        if (this.token) {
-          config.headers.Authorization = `Token ${this.token}`;
+      (config: InternalAxiosRequestConfig) => {
+        const token = localStorage.getItem('token');
+        if (token) {
+          config.headers.Authorization = `Token ${token}`;
         }
         return config;
       },
-      (error) => Promise.reject(error)
+      (error) => {
+        return Promise.reject(error);
+      }
     );
 
     // Response interceptor
     this.client.interceptors.response.use(
       (response) => response,
-      async (error) => {
+      async (error: AxiosError) => {
         if (error.response?.status === 401) {
-          // Handle token expiration
-          this.clearToken();
-          window.location.href = '/login';
+          // Token expired or invalid
+          localStorage.removeItem('token');
+          localStorage.removeItem('auth-storage');
+          
+          // Redirect to login if in browser
+          if (typeof window !== 'undefined') {
+            window.location.href = '/login';
+          }
         }
         return Promise.reject(error);
       }
     );
   }
-
-  setToken(token: string) {
-    this.token = token;
-    localStorage.setItem('token', token);
-  }
-
-  getToken(): string | null {
-    if (!this.token) {
-      this.token = localStorage.getItem('token');
+  setToken(token: string | null) {
+    if (token) {
+      localStorage.setItem('token', token);
+      this.client.defaults.headers.common['Authorization'] = `Token ${token}`;
+    } else {
+      localStorage.removeItem('token');
+      delete this.client.defaults.headers.common['Authorization'];
     }
-    return this.token;
   }
 
-  clearToken() {
-    this.token = null;
+  removeToken() {
     localStorage.removeItem('token');
+    delete this.client.defaults.headers.common['Authorization'];
   }
-
-  // Generic request methods
+  
+  // GET request - returns the data directly
   async get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.client.get<T>(url, config);
     return response.data;
   }
 
+  // POST request - returns the data directly
   async post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.client.post<T>(url, data, config);
     return response.data;
   }
 
+  // PUT request - returns the data directly
   async put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.client.put<T>(url, data, config);
     return response.data;
   }
 
+  // PATCH request - returns the data directly
   async patch<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.client.patch<T>(url, data, config);
     return response.data;
   }
 
+  // DELETE request - returns the data directly
   async delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.client.delete<T>(url, config);
     return response.data;
   }
 
-  // File upload
-  async upload<T>(url: string, formData: FormData): Promise<T> {
+  // Upload file - returns the data directly
+  async upload<T>(url: string, formData: FormData, onProgress?: (progress: number) => void): Promise<T> {
     const response = await this.client.post<T>(url, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          onProgress(percentCompleted);
+        }
       },
     });
     return response.data;
   }
 }
 
-export const api = new ApiService();
+export const api = new ApiClient();

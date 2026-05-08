@@ -1,10 +1,11 @@
 export interface MessageMedia {
   id: string;
   message_id: string;
-  file: string;
+  file_url: string;
   thumbnail?: string;
   file_name: string;
   file_size: number;
+  download_url: string;
   mime_type: string;
   width?: number;
   height?: number;

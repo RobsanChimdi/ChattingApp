@@ -1,6 +1,7 @@
+// hooks/useMessages.ts
 import { useState, useCallback, useEffect } from 'react';
-import { useChatStore } from '@/store/chatStore';
-import { useAuthStore } from '@/store/authStore';
+import { useChatStore } from '@/store/chatStore'; // FIXED: changed from chatStore
+import { useAuthStore } from '@/store/authStore'; // FIXED: changed from authStore
 import { messageService } from '@/services/message.service';
 import type { Message, MessageReaction, MessageCreateData } from '@/types';
 
@@ -10,30 +11,24 @@ interface UseMessagesReturn {
   replyToMessage: Message | null;
   isLoading: boolean;
   error: string | null;
-
   sendMessage: (text: string, files?: File[]) => Promise<Message | null>;
-  editMessage: (messageId: string, text: string) => Promise<void>;
-  deleteMessage: (messageId: string) => Promise<void>;
-  forwardMessage: (targetChatId: string) => Promise<void>;
-
+  editMessage: (messageId: number, text: string) => Promise<void>;
+  deleteMessage: (messageId: number) => Promise<void>;
+  forwardMessage: (targetChatId: number) => Promise<void>;
   selectMessage: (message: Message | null) => void;
   setReplyTo: (message: Message | null) => void;
   clearSelection: () => void;
-
   addReaction: (emoji: string) => Promise<void>;
-  removeReaction: () => Promise<void>;
-
+  removeReaction: (emoji: string) => Promise<void>;
   uploadMedia: (file: File) => Promise<any>;
-  markAsRead: (messageId: string) => Promise<void>;
+  markAsRead: (messageId: number) => Promise<void>;
   searchInMessages: (query: string) => Message[];
-
   canEditMessage: (message: Message) => boolean;
   canDeleteMessage: (message: Message) => boolean;
-
   clearError: () => void;
 }
 
-export const useMessages = (chatId?: string): UseMessagesReturn => {
+export const useMessages = (chatId?: number): UseMessagesReturn => {
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -52,10 +47,11 @@ export const useMessages = (chatId?: string): UseMessagesReturn => {
     clearError: clearStoreError,
   } = useChatStore();
 
+  const { user } = useAuthStore();
+
   const messages = chatId ? storeMessages.get(chatId) || [] : [];
   const error = localError || storeError;
 
-  // Clear errors when chat changes
   useEffect(() => {
     setLocalError(null);
     clearStoreError();
@@ -82,7 +78,7 @@ export const useMessages = (chatId?: string): UseMessagesReturn => {
     }
   }, [chatId, replyToMessage, sendMessageAction]);
 
-  const editMessage = useCallback(async (messageId: string, text: string) => {
+  const editMessage = useCallback(async (messageId: number, text: string) => {
     if (!chatId) return setLocalError('No active chat selected');
     try {
       await editMessageAction(chatId, messageId, text);
@@ -92,7 +88,7 @@ export const useMessages = (chatId?: string): UseMessagesReturn => {
     }
   }, [chatId, editMessageAction]);
 
-  const deleteMessage = useCallback(async (messageId: string) => {
+  const deleteMessage = useCallback(async (messageId: number) => {
     if (!chatId) return setLocalError('No active chat selected');
     try {
       await deleteMessageAction(chatId, messageId);
@@ -102,10 +98,9 @@ export const useMessages = (chatId?: string): UseMessagesReturn => {
     }
   }, [chatId, deleteMessageAction]);
 
-  const forwardMessage = useCallback(async (targetChatId: string) => {
+  const forwardMessage = useCallback(async (targetChatId: number) => {
     if (!selectedMessage) return setLocalError('No message selected');
     try {
-      // Only pass messageId and targetChatId (store handles chatId internally)
       await forwardMessageAction(selectedMessage.id, targetChatId);
       setSelectedMessage(null);
     } catch (err: any) {
@@ -114,27 +109,30 @@ export const useMessages = (chatId?: string): UseMessagesReturn => {
   }, [selectedMessage, forwardMessageAction]);
 
   const addReaction = useCallback(async (emoji: string) => {
-    if (!selectedMessage || !chatId) return;
+    if (!selectedMessage || !chatId || !user) return;
     try {
-      await addReactionAction(chatId, selectedMessage.id, { id: '', message_id: selectedMessage.id, emoji, user: useAuthStore.getState().user!, created_at: new Date().toISOString() });
+      await messageService.addReaction(selectedMessage.id, emoji);
       setSelectedMessage(null);
     } catch (err: any) {
       setLocalError(err.message || 'Failed to add reaction');
     }
-  }, [selectedMessage, chatId, addReactionAction]);
+  }, [selectedMessage, chatId, user]);
 
-  const removeReaction = useCallback(async () => {
-    if (!selectedMessage || !chatId) return;
+  const removeReaction = useCallback(async (emoji: string) => {
+    if (!selectedMessage || !chatId || !user) return;
     try {
-      await removeReactionAction(chatId, selectedMessage.id, useAuthStore.getState().user!.id);
+      await messageService.removeReaction(selectedMessage.id, emoji);
       setSelectedMessage(null);
     } catch (err: any) {
       setLocalError(err.message || 'Failed to remove reaction');
     }
-  }, [selectedMessage, chatId, removeReactionAction]);
+  }, [selectedMessage, chatId, user]);
 
   const uploadMedia = useCallback(async (file: File) => {
-    if (!chatId) return setLocalError('No active chat selected');
+    if (!chatId) {
+      setLocalError('No active chat selected');
+      return null;
+    }
     setIsUploading(true);
     try {
       return await messageService.uploadMedia(chatId, file);
@@ -146,7 +144,7 @@ export const useMessages = (chatId?: string): UseMessagesReturn => {
     }
   }, [chatId]);
 
-  const markAsRead = useCallback(async (messageId: string) => {
+  const markAsRead = useCallback(async (messageId: number) => {
     try {
       await messageService.markMessageAsRead(messageId);
     } catch (err) {
@@ -156,24 +154,23 @@ export const useMessages = (chatId?: string): UseMessagesReturn => {
 
   const searchInMessages = useCallback((query: string): Message[] => {
     if (!query.trim()) return [];
-    return messages.filter(m => !m.is_deleted && m.text?.toLowerCase().includes(query.toLowerCase()));
+    const searchTerm = query.toLowerCase();
+    return messages.filter(m => !m.is_deleted && m.text?.toLowerCase().includes(searchTerm));
   }, [messages]);
 
   const canEditMessage = useCallback((message: Message) => {
-    const user = useAuthStore.getState().user;
-    if (!user || message.is_deleted || message.sender.id !== user.id) return false;
+    if (!user || message.is_deleted || message.sender !== user.id) return false;
     const fifteenMinutes = 15 * 60 * 1000;
     return Date.now() - new Date(message.created_at).getTime() <= fifteenMinutes;
-  }, []);
+  }, [user]);
 
   const canDeleteMessage = useCallback((message: Message) => {
-    const user = useAuthStore.getState().user;
     const currentChat = useChatStore.getState().currentChat;
     if (!user || message.is_deleted) return false;
-    if (message.sender.id === user.id) return true;
+    if (message.sender === user.id) return true;
     if (currentChat?.chat_type === 'group' && currentChat.admin?.id === user.id) return true;
     return false;
-  }, []);
+  }, [user]);
 
   const selectMessage = useCallback((message: Message | null) => {
     setSelectedMessage(message);

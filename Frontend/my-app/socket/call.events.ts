@@ -1,3 +1,4 @@
+// socket/call.events.ts
 import { socketService } from './socket';
 import { useCallStore } from '@/store/callStore';
 import type { 
@@ -5,7 +6,7 @@ import type {
   CallParticipant, 
   WebRTCSignal,
   CallQuality,
-  CallStatus  // Import the CallStatus type
+  CallStatus
 } from '@/types';
 
 // Define call statuses if not already defined in your types
@@ -36,7 +37,7 @@ export const setupCallEvents = () => {
 
   // ✅ Call accepted by participant
   socketService.on('call_accepted', (data: { 
-    call_id: string; 
+    call_id: number; // Changed from string to number
     participant: CallParticipant 
   }) => {
     callStore.addParticipant(data.call_id, data.participant);
@@ -47,7 +48,7 @@ export const setupCallEvents = () => {
 
   // ❌ Call rejected
   socketService.on('call_rejected', (data: { 
-    call_id: string; 
+    call_id: number; // Changed from string to number
     user_id: number;
     reason?: string;
   }) => {
@@ -64,11 +65,11 @@ export const setupCallEvents = () => {
 
   // 📵 Call ended
   socketService.on('call_ended', (data: { 
-    call_id: string; 
+    call_id: number; // Changed from string to number
     reason: string;
     ended_by?: number;
   }) => {
-    callStore.endCall(data.call_id);
+    callStore.cleanup();
     
     // Stop ringtone
     stopRingtone();
@@ -76,7 +77,7 @@ export const setupCallEvents = () => {
 
   // 👤 Participant joined call
   socketService.on('participant_joined', (data: { 
-    call_id: string; 
+    call_id: number; // Changed from string to number
     participant: CallParticipant 
   }) => {
     callStore.addParticipant(data.call_id, data.participant);
@@ -84,7 +85,7 @@ export const setupCallEvents = () => {
 
   // 👋 Participant left call
   socketService.on('participant_left', (data: { 
-    call_id: string; 
+    call_id: number; // Changed from string to number
     user_id: number;
     reason?: string;
   }) => {
@@ -93,7 +94,7 @@ export const setupCallEvents = () => {
 
   // 🔇 Participant muted/unmuted
   socketService.on('participant_muted', (data: { 
-    call_id: string; 
+    call_id: number; // Changed from string to number
     user_id: number; 
     is_muted: boolean 
   }) => {
@@ -104,7 +105,7 @@ export const setupCallEvents = () => {
 
   // 📹 Participant video toggled
   socketService.on('participant_video_toggled', (data: { 
-    call_id: string; 
+    call_id: number; // Changed from string to number
     user_id: number; 
     has_video: boolean 
   }) => {
@@ -121,7 +122,7 @@ export const setupCallEvents = () => {
 
   // 📊 Call quality updates
   socketService.on('call_quality_update', (data: {
-    call_id: string;
+    call_id: number; // Changed from string to number
     user_id: number;
     quality: Partial<CallQuality>;
   }) => {
@@ -130,8 +131,8 @@ export const setupCallEvents = () => {
 
   // 🔄 Call status updated
   socketService.on('call_status_updated', (data: {
-    call_id: string;
-    status: CallStatus; // Use the specific CallStatus type
+    call_id: number;
+    status: CallStatus;
     updated_at: string;
   }) => {
     // Update call status in store if active
@@ -140,59 +141,58 @@ export const setupCallEvents = () => {
       callStore.setActiveCall({
         ...activeCall,
         status: data.status,
-        updated_at: data.updated_at,
       });
     }
   });
 
   // ---------- EMITTERS ----------
 
-  const initiateCall = (chatId: string, callType: 'audio' | 'video') => {
+  const initiateCall = (chatId: number, callType: 'audio' | 'video') => { // Changed chatId to number
     socketService.emit('initiate_call', {
       chat_id: chatId,
       call_type: callType,
     });
   };
 
-  const acceptCall = (callId: string) => {
+  const acceptCall = (callId: number) => { // Changed to number
     socketService.emit('accept_call', {
       call_id: callId,
     });
   };
 
-  const rejectCall = (callId: string, reason?: string) => {
+  const rejectCall = (callId: number, reason?: string) => { // Changed to number
     socketService.emit('reject_call', {
       call_id: callId,
       reason: reason,
     });
   };
 
-  const endCall = (callId: string) => {
+  const endCall = (callId: number) => { // Changed to number
     socketService.emit('end_call', {
       call_id: callId,
     });
   };
 
-  const joinCall = (callId: string) => {
+  const joinCall = (callId: number) => { // Changed to number
     socketService.emit('join_call', {
       call_id: callId,
     });
   };
 
-  const leaveCall = (callId: string) => {
+  const leaveCall = (callId: number) => { // Changed to number
     socketService.emit('leave_call', {
       call_id: callId,
     });
   };
 
-  const toggleMute = (callId: string, isMuted: boolean) => {
+  const toggleMute = (callId: number, isMuted: boolean) => { // Changed to number
     socketService.emit('toggle_mute', {
       call_id: callId,
       is_muted: isMuted,
     });
   };
 
-  const toggleVideo = (callId: string, hasVideo: boolean) => {
+  const toggleVideo = (callId: number, hasVideo: boolean) => { // Changed to number
     socketService.emit('toggle_video', {
       call_id: callId,
       has_video: hasVideo,
@@ -203,7 +203,7 @@ export const setupCallEvents = () => {
     socketService.emit('webrtc_signal', signal);
   };
 
-  const logCallQuality = (callId: string, qualityData: Partial<CallQuality>) => {
+  const logCallQuality = (callId: number, qualityData: Partial<CallQuality>) => { // Changed to number
     socketService.emit('log_call_quality', {
       call_id: callId,
       ...qualityData,
@@ -215,7 +215,9 @@ export const setupCallEvents = () => {
 
   const playRingtone = () => {
     try {
-      ringtoneAudio = new Audio('/sounds/ringtone.mp3');
+      if (!ringtoneAudio) {
+        ringtoneAudio = new Audio('/sounds/ringtone.mp3');
+      }
       ringtoneAudio.loop = true;
       ringtoneAudio.volume = 0.7;
       ringtoneAudio.play().catch(() => {
@@ -254,11 +256,11 @@ export const setupCallEvents = () => {
     logCallQuality,
     
     // Room management
-    joinCallRoom: (callId: string) => {
+    joinCallRoom: (callId: number) => { // Changed to number
       socketService.emit('join_call_room', { call_id: callId });
     },
     
-    leaveCallRoom: (callId: string) => {
+    leaveCallRoom: (callId: number) => { // Changed to number
       socketService.emit('leave_call_room', { call_id: callId });
     },
     

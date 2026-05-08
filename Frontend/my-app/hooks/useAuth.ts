@@ -1,3 +1,4 @@
+// hooks/useAuth.ts
 import { useEffect, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
@@ -10,26 +11,48 @@ interface UseAuthReturn {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  isEmailVerified: boolean;
+  verificationEmailSent: boolean;
   
-  // Actions
+  // Authentication Actions
   login: (credentials: { username: string; password: string }) => Promise<void>;
   register: (data: {
     username: string;
     email: string;
     password: string;
+    confirm_password: string;
     first_name?: string;
     last_name?: string;
+    bio?: string;
+    phone_number?: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
-  updateProfile: (data: Partial<User>) => Promise<void>;
   
-  // Status
+  // Email Verification
+  verifyEmail: (data: { email: string; verification_code: string }) => Promise<boolean>;
+  resendVerificationCode: (email: string) => Promise<void>;
+  
+  // Password Reset
+  requestPasswordReset: (email: string) => Promise<void>;
+  resetPassword: (data: { 
+    reset_token: string; 
+    new_password: string; 
+    confirm_password: string;
+  }) => Promise<void>;
+  
+  // Profile Actions
+  updateProfile: (data: FormData | Partial<User>) => Promise<User>;
   updateLastSeen: () => Promise<void>;
   setOffline: () => Promise<void>;
+  
+  // WebSocket
+  getWebSocketToken: () => Promise<{ token: string; user_id: number; username?: string }>;
   
   // Utilities
   requireAuth: (redirectTo?: string) => boolean;
   requireGuest: (redirectTo?: string) => boolean;
+  requireVerified: (redirectTo?: string) => boolean;
+  clearError: () => void;
 }
 
 export const useAuth = (): UseAuthReturn => {
@@ -42,152 +65,291 @@ export const useAuth = (): UseAuthReturn => {
     isAuthenticated,
     isLoading,
     error,
+    isEmailVerified,
+    verificationEmailSent,
     login: loginAction,
     register: registerAction,
     logout: logoutAction,
+    verifyEmail: verifyEmailAction,
+    resendVerificationCode: resendVerificationCodeAction,
+    requestPasswordReset: requestPasswordResetAction,
+    resetPassword: resetPasswordAction,
     updateProfile: updateProfileAction,
-    updateLastSeen,
-    setOffline,
+    updateLastSeen: updateLastSeenAction,
+    setOffline: setOfflineAction,
+    getWebSocketToken,
     setError,
-    clearError,
+    clearError: clearErrorAction,
   } = useAuthStore();
 
-  // Auto-connect socket when authenticated
+  // FIXED: Only connect socket when authenticated AND email verified
   useEffect(() => {
-    if (isAuthenticated && !socketService.isConnected()) {
-      socketService.connect().catch((error) => {
-        console.error('Failed to connect socket:', error);
-        setError('Connection error. Please refresh the page.');
-      });
-    }
-    
-    if (!isAuthenticated && socketService.isConnected()) {
-      socketService.disconnect();
-    }
-  }, [isAuthenticated, setError]);
+    let isMounted = true;
+    let isConnecting = false;
 
-  // Auto-update last seen when user is active
+    const connectSocket = async () => {
+      // Prevent multiple connection attempts
+      if (isConnecting) return;
+      
+      // Only connect if:
+      // 1. User is authenticated
+      // 2. Email is verified  
+      // 3. Socket is not already connected
+      // 4. Not manually disconnected
+      // 5. Page is visible (prevents background connections)
+      if (isAuthenticated && isEmailVerified && !socketService.isConnected() && document.visibilityState === 'visible') {
+        isConnecting = true;
+        try {
+          await getWebSocketToken();
+          await socketService.connect();
+        } catch (error) {
+          console.error('Failed to connect socket:', error);
+          if (isMounted) {
+            setError('Connection error. Please refresh the page.');
+          }
+        } finally {
+          isConnecting = false;
+        }
+      }
+      
+      // Disconnect if not authenticated
+      if (!isAuthenticated && socketService.isConnected()) {
+        socketService.disconnect();
+      }
+    };
+
+    // Delay initial connection to avoid race conditions
+    const timer = setTimeout(connectSocket, 500);
+
+    return () => {
+      clearTimeout(timer);
+      isMounted = false;
+    };
+  }, [isAuthenticated, isEmailVerified, getWebSocketToken, setError]);
+
+  // Handle visibility change (tab becomes visible)
   useEffect(() => {
-    if (!isAuthenticated) return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isAuthenticated && isEmailVerified && !socketService.isConnected()) {
+        console.log('Tab became visible, reconnecting socket...');
+        getWebSocketToken()
+          .then(() => socketService.connect())
+          .catch(error => console.error('Failed to reconnect socket:', error));
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isAuthenticated, isEmailVerified, getWebSocketToken]);
+
+  // Auto-update last seen when user is active (only if verified)
+  useEffect(() => {
+    if (!isAuthenticated || !isEmailVerified) return;
 
     let lastActivity = Date.now();
-    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll'];
+    let activityTimer: NodeJS.Timeout;
+    let updateTimer: NodeJS.Timeout;
+    
+    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
 
-    const handleActivity = () => {
+    const updateLastSeen = () => {
       const now = Date.now();
-      // Update last seen every 30 seconds of activity
-      if (now - lastActivity > 30000) {
-        updateLastSeen().catch(console.error);
+      if (now - lastActivity >= 30000) {
+        updateLastSeenAction().catch(console.error);
         lastActivity = now;
       }
     };
 
-    // Add event listeners
+    const handleActivity = () => {
+      clearTimeout(activityTimer);
+      activityTimer = setTimeout(updateLastSeen, 1000);
+    };
+
+    const startPeriodicUpdate = () => {
+      updateTimer = setInterval(() => {
+        updateLastSeenAction().catch(console.error);
+      }, 60000);
+    };
+
     activityEvents.forEach((event) => {
       window.addEventListener(event, handleActivity);
     });
 
-    // Initial update
-    updateLastSeen().catch(console.error);
+    updateLastSeenAction().catch(console.error);
+    startPeriodicUpdate();
 
     return () => {
-      // Cleanup event listeners
+      clearTimeout(activityTimer);
+      clearInterval(updateTimer);
       activityEvents.forEach((event) => {
         window.removeEventListener(event, handleActivity);
       });
 
-      // Set offline when component unmounts (if still authenticated)
-      if (isAuthenticated) {
-        setOffline().catch(console.error);
+      if (isAuthenticated && isEmailVerified) {
+        setOfflineAction().catch(console.error);
       }
     };
-  }, [isAuthenticated, updateLastSeen, setOffline]);
-
-  // Wrapped actions with error handling
-  interface LoginCredentials {
-    username: string;
-    password: string;
-  }
+  }, [isAuthenticated, isEmailVerified, updateLastSeenAction, setOfflineAction]);
 
   const login = useCallback(
-    async (credentials: LoginCredentials): Promise<void> => {
+    async (credentials: { username: string; password: string }): Promise<void> => {
       try {
         await loginAction(credentials);
-        clearError();
+        clearErrorAction();
 
-        // Redirect to main page after successful login
+        const state = useAuthStore.getState();
+        
+        if (!state.isEmailVerified) {
+          router.push('/verify-email');
+          return;
+        }
+
         const redirectPath = sessionStorage.getItem('redirectAfterLogin') || '/';
         sessionStorage.removeItem('redirectAfterLogin');
         router.push(redirectPath);
       } catch (error) {
-        // Error is already set in store
         throw error;
       }
     },
-    [loginAction, router, clearError]
+    [loginAction, router, clearErrorAction]
   );
-
-  interface RegisterData {
-    username: string;
-    email: string;
-    password: string;
-    first_name?: string;
-    last_name?: string;
-  }
 
   const register = useCallback(
-    async (data: RegisterData): Promise<void> => {
+    async (data: {
+      username: string;
+      email: string;
+      password: string;
+      confirm_password: string;
+      first_name?: string;
+      last_name?: string;
+      bio?: string;
+      phone_number?: string;
+    }): Promise<void> => {
       try {
         await registerAction(data);
-        clearError();
-        
-        // Redirect to main page after successful registration
-        router.push('/');
+        clearErrorAction();
+        router.push('/verify-email');
       } catch (error) {
         throw error;
       }
     },
-    [registerAction, router, clearError]
+    [registerAction, router, clearErrorAction]
   );
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (): Promise<void> => {
     try {
       await logoutAction();
-      clearError();
+      clearErrorAction();
       
-      // Redirect to login page
+      if (socketService.isConnected()) {
+        socketService.disconnect();
+      }
+      
       router.push('/login');
     } catch (error) {
-      throw error;
+      console.error('Logout error:', error);
+      router.push('/login');
     }
-  }, [logoutAction, router, clearError]);
+  }, [logoutAction, router, clearErrorAction]);
 
-  interface UpdateProfileData extends Partial<User> {}
-
-  const updateProfile = useCallback(
-    async (data: UpdateProfileData): Promise<void> => {
+  const verifyEmail = useCallback(
+    async (data: { email: string; verification_code: string }): Promise<boolean> => {
       try {
-        await updateProfileAction(data);
-        clearError();
+        const result = await verifyEmailAction(data);
+        clearErrorAction();
+        
+        if (result) {
+          router.push('/');
+        }
+        
+        return result;
       } catch (error) {
         throw error;
       }
     },
-    [updateProfileAction, clearError]
+    [verifyEmailAction, router, clearErrorAction]
   );
 
-  // Auth guards
-  const requireAuth = useCallback((redirectTo = '/login') => {
+  const resendVerificationCode = useCallback(
+    async (email: string): Promise<void> => {
+      try {
+        await resendVerificationCodeAction(email);
+        clearErrorAction();
+      } catch (error) {
+        throw error;
+      }
+    },
+    [resendVerificationCodeAction, clearErrorAction]
+  );
+
+  const requestPasswordReset = useCallback(
+    async (email: string): Promise<void> => {
+      try {
+        await requestPasswordResetAction(email);
+        clearErrorAction();
+      } catch (error) {
+        throw error;
+      }
+    },
+    [requestPasswordResetAction, clearErrorAction]
+  );
+
+  const resetPassword = useCallback(
+    async (data: { 
+      reset_token: string; 
+      new_password: string; 
+      confirm_password: string;
+    }): Promise<void> => {
+      try {
+        await resetPasswordAction(data);
+        clearErrorAction();
+        router.push('/login?reset=success');
+      } catch (error) {
+        throw error;
+      }
+    },
+    [resetPasswordAction, router, clearErrorAction]
+  );
+
+  const updateProfile = useCallback(
+    async (data: FormData | Partial<User>): Promise<User> => {
+      try {
+        const updatedUser = await updateProfileAction(data);
+        clearErrorAction();
+        return updatedUser;
+      } catch (error) {
+        throw error;
+      }
+    },
+    [updateProfileAction, clearErrorAction]
+  );
+
+  const updateLastSeen = useCallback(async (): Promise<void> => {
+    try {
+      await updateLastSeenAction();
+    } catch (error) {
+      console.error('Failed to update last seen:', error);
+    }
+  }, [updateLastSeenAction]);
+
+  const setOffline = useCallback(async (): Promise<void> => {
+    try {
+      await setOfflineAction();
+    } catch (error) {
+      console.error('Failed to set offline:', error);
+    }
+  }, [setOfflineAction]);
+
+  const requireAuth = useCallback((redirectTo = '/login'): boolean => {
     if (!isAuthenticated && !isLoading) {
-      // Save current path for redirect after login
-      sessionStorage.setItem('redirectAfterLogin', pathname);
+      sessionStorage.setItem('redirectAfterLogin', pathname || '/');
       router.push(redirectTo);
       return false;
     }
     return true;
   }, [isAuthenticated, isLoading, pathname, router]);
 
-  const requireGuest = useCallback((redirectTo = '/') => {
+  const requireGuest = useCallback((redirectTo = '/'): boolean => {
     if (isAuthenticated && !isLoading) {
       router.push(redirectTo);
       return false;
@@ -195,33 +357,50 @@ export const useAuth = (): UseAuthReturn => {
     return true;
   }, [isAuthenticated, isLoading, router]);
 
+  const requireVerified = useCallback((redirectTo = '/verify-email'): boolean => {
+    if (isAuthenticated && !isEmailVerified && !isLoading) {
+      router.push(redirectTo);
+      return false;
+    }
+    return true;
+  }, [isAuthenticated, isEmailVerified, isLoading, router]);
+
+  const clearError = useCallback((): void => {
+    clearErrorAction();
+  }, [clearErrorAction]);
+
   return {
-    // State
     user,
     isAuthenticated,
     isLoading,
     error,
-    
-    // Actions
+    isEmailVerified,
+    verificationEmailSent,
     login,
     register,
     logout,
+    verifyEmail,
+    resendVerificationCode,
+    requestPasswordReset,
+    resetPassword,
     updateProfile,
-    
-    // Status
     updateLastSeen,
     setOffline,
-    
-    // Utilities
+    getWebSocketToken,
     requireAuth,
     requireGuest,
+    requireVerified,
+    clearError,
   };
 };
 
 // Selector hooks for specific auth state
 export const useCurrentUser = () => useAuthStore((state) => state.user);
 export const useIsAuthenticated = () => useAuthStore((state) => state.isAuthenticated);
+export const useIsEmailVerified = () => useAuthStore((state) => state.isEmailVerified);
 export const useAuthStatus = () => useAuthStore((state) => ({
   isLoading: state.isLoading,
   error: state.error,
+  isEmailVerified: state.isEmailVerified,
+  verificationEmailSent: state.verificationEmailSent,
 }));

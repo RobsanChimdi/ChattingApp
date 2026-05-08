@@ -1,30 +1,6 @@
 // socket/socket.ts
 import io, { Socket } from 'socket.io-client';
-import { authService } from '@/services/auth.service';
 import { useAuthStore } from '@/store/authStore';
-
-// Types for WebSocket events matching Django Channels
-interface SocketEvent {
-  type: string;
-  payload: any;
-}
-
-interface WebSocketAuth {
-  token: string;
-}
-
-interface JoinRoomEvent {
-  room: string;
-}
-
-interface LeaveRoomEvent {
-  room: string;
-}
-
-interface WebSocketMessage {
-  type: string;
-  message: any;
-}
 
 interface CallbackFunction {
   (data: any): void;
@@ -43,9 +19,9 @@ class SocketService {
   // Connection status tracking
   private _isConnected = false;
   private connectionCallbacks: Array<(connected: boolean) => void> = [];
+  private isConnecting = false;
 
   constructor() {
-    // Auto-reconnect on page visibility change
     if (typeof window !== 'undefined') {
       window.addEventListener('online', this.handleOnline.bind(this));
       window.addEventListener('offline', this.handleOffline.bind(this));
@@ -55,26 +31,43 @@ class SocketService {
 
   // ========== PUBLIC API ==========
 
-  /**
-   * Connect to WebSocket server
-   */
   async connect(): Promise<void> {
+    // Prevent multiple connection attempts
+    if (this.isConnecting) {
+      console.log('Connection already in progress, waiting...');
+      return this.connectionPromise || Promise.resolve();
+    }
+
     if (this.connectionPromise) {
       return this.connectionPromise;
     }
 
-    // Don't connect if manually disconnected
     if (this.isManuallyDisconnected) {
+      console.log('Manually disconnected, not connecting');
       return;
     }
 
+    // Check if authenticated before attempting to connect
+    const authState = useAuthStore.getState();
+    if (!authState.isAuthenticated || !authState.token) {
+      console.log('Not authenticated, skipping socket connection');
+      return;
+    }
+
+    this.isConnecting = true;
     this.connectionPromise = this._connect();
+    
+    try {
+      await this.connectionPromise;
+    } catch (error) {
+      console.error('Connection failed:', error);
+    } finally {
+      this.isConnecting = false;
+    }
+    
     return this.connectionPromise;
   }
 
-  /**
-   * Disconnect from WebSocket server
-   */
   disconnect(): void {
     this.isManuallyDisconnected = true;
     
@@ -86,24 +79,18 @@ class SocketService {
     this._isConnected = false;
     this.notifyConnectionStatus(false);
     this.connectionPromise = null;
+    this.isConnecting = false;
     
     console.log('WebSocket manually disconnected');
   }
 
-  /**
-   * Check if connected
-   */
   isConnected(): boolean {
     return this._isConnected;
   }
 
-  /**
-   * Subscribe to connection status changes
-   */
   onConnectionChange(callback: (connected: boolean) => void): () => void {
     this.connectionCallbacks.push(callback);
     
-    // Return unsubscribe function
     return () => {
       const index = this.connectionCallbacks.indexOf(callback);
       if (index > -1) {
@@ -112,9 +99,6 @@ class SocketService {
     };
   }
 
-  /**
-   * Register event listener
-   */
   on(event: string, callback: CallbackFunction): void {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, []);
@@ -122,9 +106,6 @@ class SocketService {
     this.eventListeners.get(event)!.push(callback);
   }
 
-  /**
-   * Remove event listener
-   */
   off(event: string, callback: CallbackFunction): void {
     const callbacks = this.eventListeners.get(event);
     if (callbacks) {
@@ -135,9 +116,6 @@ class SocketService {
     }
   }
 
-  /**
-   * Emit event to server
-   */
   emit(event: string, data?: any): boolean {
     if (!this.socket || !this._isConnected) {
       console.warn(`Cannot emit ${event}: Socket not connected`);
@@ -153,9 +131,6 @@ class SocketService {
     }
   }
 
-  /**
-   * Join a room/channel
-   */
   joinRoom(room: string): boolean {
     if (!this._isConnected) {
       console.warn(`Cannot join room ${room}: Socket not connected`);
@@ -167,9 +142,6 @@ class SocketService {
     return true;
   }
 
-  /**
-   * Leave a room/channel
-   */
   leaveRoom(room: string): boolean {
     if (!this._isConnected) {
       return false;
@@ -180,16 +152,10 @@ class SocketService {
     return true;
   }
 
-  /**
-   * Get all subscribed rooms
-   */
   getSubscribedRooms(): string[] {
     return Array.from(this.roomSubscriptions);
   }
 
-  /**
-   * Rejoin all rooms after reconnection
-   */
   private rejoinRooms(): void {
     this.roomSubscriptions.forEach(room => {
       this.emit('join_room', { room });
@@ -200,42 +166,33 @@ class SocketService {
 
   private async _connect(): Promise<void> {
     try {
-      // Get authentication token
       const authState = useAuthStore.getState();
       const token = authState.token;
       
-      if (!token) {
-        throw new Error('No authentication token available');
+      // CRITICAL: Don't throw error, just return silently
+      if (!token || !authState.isAuthenticated) {
+        console.log('No authentication token or not authenticated, skipping connection');
+        return;
       }
 
-      // Clean up existing connection
       if (this.socket) {
         this.socket.removeAllListeners();
         this.socket.disconnect();
       }
 
-      // WebSocket URL - adjust based on your Django setup
       const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
                    process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws') || 
                    'ws://localhost:8000';
 
       console.log(`Connecting to WebSocket at: ${wsUrl}/ws/`);
 
-      // Create socket connection with Django Channels format
       this.socket = io(`${wsUrl}/ws/`, {
-        auth: {
-          token: token
-        },
+        auth: { token },
         transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: this.maxReconnectAttempts,
-        reconnectionDelay: this.reconnectDelay,
-        reconnectionDelayMax: 5000,
+        reconnection: false,
         timeout: 10000,
         forceNew: true,
         withCredentials: true,
-        path: '/ws/socket.io/',
-        autoConnect: true,
       });
 
       this.setupEventListeners();
@@ -275,7 +232,7 @@ class SocketService {
     } catch (error) {
       console.error('Failed to establish WebSocket connection:', error);
       this.scheduleReconnect();
-      throw error;
+      // Don't re-throw, just log
     } finally {
       this.connectionPromise = null;
     }
@@ -284,17 +241,12 @@ class SocketService {
   private setupEventListeners(): void {
     if (!this.socket) return;
 
-    // Connection events
     this.socket.on('connect', () => {
       console.log('WebSocket connected');
       this._isConnected = true;
       this.notifyConnectionStatus(true);
       this.reconnectAttempts = 0;
-      
-      // Rejoin all previously subscribed rooms
       this.rejoinRooms();
-      
-      // Emit custom event for internal use
       this.triggerEvent('socket:connected', null);
     });
 
@@ -304,8 +256,7 @@ class SocketService {
       this.notifyConnectionStatus(false);
       this.triggerEvent('socket:disconnected', { reason });
       
-      if (!this.isManuallyDisconnected && 
-          reason !== 'io client disconnect') {
+      if (!this.isManuallyDisconnected && reason !== 'io client disconnect') {
         this.scheduleReconnect();
       }
     });
@@ -322,41 +273,14 @@ class SocketService {
       }
     });
 
-    this.socket.on('reconnect_attempt', (attempt: number) => {
-      console.log(`WebSocket reconnection attempt ${attempt}`);
-      this.triggerEvent('socket:reconnect_attempt', { attempt });
-    });
-
-    this.socket.on('reconnect', (attempt: number) => {
-      console.log(`WebSocket reconnected after ${attempt} attempts`);
-      this.triggerEvent('socket:reconnected', { attempt });
-    });
-
-    this.socket.on('reconnect_failed', () => {
-      console.error('WebSocket reconnection failed');
-      this.triggerEvent('socket:reconnect_failed', null);
-    });
-
-    // Custom event handling
     this.socket.onAny((eventName: string, ...args: any[]) => {
-      this.handleIncomingEvent(eventName, args[0]);
+      this.triggerEvent(eventName, args[0]);
     });
-
-    // Ping/pong for connection monitoring
-    this.socket.on('ping', () => {
-      this.socket?.emit('pong');
-    });
-  }
-
-  private handleIncomingEvent(eventName: string, data: any): void {
-    // console.log(`Received WebSocket event: ${eventName}`, data);
-    this.triggerEvent(eventName, data);
   }
 
   private triggerEvent(eventName: string, data: any): void {
     const callbacks = this.eventListeners.get(eventName);
     if (callbacks) {
-      // Use setTimeout to prevent blocking
       setTimeout(() => {
         callbacks.forEach(callback => {
           try {
@@ -370,10 +294,7 @@ class SocketService {
   }
 
   private scheduleReconnect(): void {
-    if (this.isManuallyDisconnected) {
-      return;
-    }
-
+    if (this.isManuallyDisconnected) return;
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('Max reconnection attempts reached');
       return;
@@ -388,9 +309,12 @@ class SocketService {
 
     setTimeout(() => {
       if (!this._isConnected && !this.isManuallyDisconnected) {
-        this.connect().catch(error => {
-          console.error('Reconnection failed:', error);
-        });
+        const authState = useAuthStore.getState();
+        if (authState.isAuthenticated && authState.token) {
+          this.connect().catch(console.error);
+        } else {
+          console.log('Not authenticated, skipping reconnect');
+        }
       }
     }, delay);
   }
@@ -405,12 +329,15 @@ class SocketService {
     });
   }
 
-  // ========== EVENT HANDLERS ==========
-
   private handleOnline(): void {
     console.log('Browser came online, attempting to reconnect...');
     if (!this._isConnected && !this.isManuallyDisconnected) {
-      this.connect().catch(console.error);
+      const authState = useAuthStore.getState();
+      if (authState.isAuthenticated && authState.token) {
+        this.connect().catch(console.error);
+      } else {
+        console.log('Browser online but not authenticated, skipping socket reconnect');
+      }
     }
   }
 
@@ -427,59 +354,32 @@ class SocketService {
     if (document.visibilityState === 'visible' && 
         !this._isConnected && 
         !this.isManuallyDisconnected) {
-      console.log('Page became visible, attempting to reconnect...');
-      this.connect().catch(console.error);
+      
+      const authState = useAuthStore.getState();
+      if (authState.isAuthenticated && authState.token) {
+        console.log('Page became visible, attempting to reconnect...');
+        this.connect().catch(console.error);
+      } else {
+        console.log('Page visible but not authenticated, skipping socket reconnect');
+      }
     }
   }
 
   // ========== UTILITY METHODS ==========
 
-  /**
-   * Send a message to a specific room
-   */
-  sendToRoom(room: string, event: string, data: any): boolean {
-    return this.emit('send_to_room', {
-      room,
-      event,
-      data
-    });
-  }
-
-  /**
-   * Broadcast to all connected clients
-   */
-  broadcast(event: string, data: any): boolean {
-    return this.emit('broadcast', {
-      event,
-      data
-    });
-  }
-
-  /**
-   * Get socket ID
-   */
   getSocketId(): string | null {
     return this.socket?.id || null;
   }
 
-  /**
-   * Check if subscribed to a room
-   */
   isSubscribedToRoom(room: string): boolean {
     return this.roomSubscriptions.has(room);
   }
 
-  /**
-   * Clear all event listeners
-   */
   clearAllListeners(): void {
     this.eventListeners.clear();
     this.connectionCallbacks = [];
   }
 
-  /**
-   * Get connection statistics
-   */
   getStats(): {
     connected: boolean;
     socketId: string | null;
@@ -497,72 +397,4 @@ class SocketService {
   }
 }
 
-// Export singleton instance
 export const socketService = new SocketService();
-
-// React hook for using socket in components
-import { useEffect, useState } from 'react';
-
-export function useSocket() {
-  const [isConnected, setIsConnected] = useState(socketService.isConnected());
-  const [socketId, setSocketId] = useState<string | null>(null);
-  const authStore = useAuthStore();
-
-  useEffect(() => {
-    // Connect when authenticated
-    if (authStore.isAuthenticated) {
-      socketService.connect().catch(console.error);
-    } else {
-      socketService.disconnect();
-    }
-
-    // Listen for connection changes
-    const unsubscribe = socketService.onConnectionChange((connected) => {
-      setIsConnected(connected);
-      setSocketId(socketService.getSocketId());
-    });
-
-    // Initial setup
-    setIsConnected(socketService.isConnected());
-    setSocketId(socketService.getSocketId());
-
-    return () => {
-      unsubscribe();
-      // Don't disconnect here - connection is managed by auth state
-    };
-  }, [authStore.isAuthenticated]);
-
-  // Helper to join chat room
-  const joinChatRoom = (chatId: string) => {
-    socketService.joinRoom(`chat_${chatId}`);
-  };
-
-  // Helper to leave chat room
-  const leaveChatRoom = (chatId: string) => {
-    socketService.leaveRoom(`chat_${chatId}`);
-  };
-
-  // Helper to join call room
-  const joinCallRoom = (callId: string) => {
-    socketService.joinRoom(`call_${callId}`);
-  };
-
-  // Helper to leave call room
-  const leaveCallRoom = (callId: string) => {
-    socketService.leaveRoom(`call_${callId}`);
-  };
-
-  return {
-    socket: socketService,
-    isConnected,
-    socketId,
-    joinChatRoom,
-    leaveChatRoom,
-    joinCallRoom,
-    leaveCallRoom,
-    stats: socketService.getStats()
-  };
-}
-
-// Default export
-export default socketService;

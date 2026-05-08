@@ -1,13 +1,13 @@
+// socket/chat.events.ts
 import { socketService } from './socket';
 import type { 
   Message, 
   MessageReaction, 
   Chat, 
   User,
-  MessageStatus
 } from '@/types';
-import { useChatStore } from '@/store/chatStore';
-import { useAuthStore } from '@/store/authStore';
+import { useChatStore } from '@/store/chatStore'; 
+import { useAuthStore } from '@/store/authStore'; 
 
 export const setupChatEvents = () => {
   const chatStore = useChatStore.getState();
@@ -18,37 +18,36 @@ export const setupChatEvents = () => {
     const { message } = data;
     const currentUserId = authStore.user?.id;
 
-    // Add message to store
-    chatStore.addMessage(message.chat_id, message);
+    chatStore.addMessage(message.chat, message);
 
     // Increment unread count if message is not from current user
-    if (message.sender.id !== currentUserId) {
-      chatStore.incrementUnreadCount(message.chat_id);
+    if (message.sender !== currentUserId) {
+      chatStore.incrementUnreadCount(message.chat);
     }
 
     // Play notification if tab is hidden
-    if (document.hidden && message.sender.id !== currentUserId) {
+    if (document.hidden && message.sender !== currentUserId) {
       playNotificationSound();
     }
   });
 
   // ✏️ Message edited
   socketService.on('message_edited', (data: { message: Message }) => {
-    chatStore.updateMessage(data.message.chat_id, data.message);
+    chatStore.updateMessage(data.message.chat, data.message);
   });
 
   // 🗑 Message deleted
   socketService.on('message_deleted', (data: { 
-    message_id: string; 
-    chat_id: string 
+    message_id: number; // Changed from string to number
+    chat_id: number; // Changed from string to number
   }) => {
     chatStore.deleteMessageLocal(data.chat_id, data.message_id);
   });
 
   // ❤️ Message reaction added
   socketService.on('reaction_added', (data: {
-    message_id: string;
-    chat_id: string;
+    message_id: number; // Changed from string to number
+    chat_id: number; // Changed from string to number
     reaction: MessageReaction;
   }) => {
     chatStore.addReaction(data.chat_id, data.message_id, data.reaction);
@@ -56,8 +55,8 @@ export const setupChatEvents = () => {
 
   // ❌ Message reaction removed
   socketService.on('reaction_removed', (data: {
-    message_id: string;
-    chat_id: string;
+    message_id: number; // Changed from string to number
+    chat_id: number; // Changed from string to number
     user_id: number;
   }) => {
     chatStore.removeReaction(data.chat_id, data.message_id, data.user_id);
@@ -65,12 +64,11 @@ export const setupChatEvents = () => {
 
   // 📨 Message status (delivered/read)
   socketService.on('message_status_updated', (data: {
-    message_id: string;
-    chat_id: string;
+    message_id: number; // Changed from string to number
+    chat_id: number; // Changed from string to number
     status: 'delivered' | 'read';
     user_id: number;
   }) => {
-    // Only handle delivered and read statuses
     chatStore.updateMessageStatus(
       data.chat_id,
       data.message_id,
@@ -81,28 +79,49 @@ export const setupChatEvents = () => {
 
   // Handle 'sent' status separately if needed
   socketService.on('message_sent', (data: {
-    message_id: string;
-    chat_id: string;
+    message_id: number; // Changed from string to number
+    chat_id: number; // Changed from string to number
     user_id: number;
   }) => {
     // Handle sent status if your store supports it
-    // Or update the message as sent in another way
     console.log('Message sent:', data.message_id);
   });
 
   // 💬 New chat created
   socketService.on('chat_created', (data: { chat: Chat }) => {
-    chatStore.addChat(data.chat);
+    const chatListItem = {
+      id: data.chat.id,
+      name: data.chat.display_name,
+      display_name: data.chat.display_name,
+      image: data.chat.image,
+      display_image: data.chat.display_image,
+      chat_type: data.chat.chat_type,
+      description: data.chat.description,
+      unread_count: 0,
+      updated_at: data.chat.updated_at,
+    };
+    chatStore.addChat(chatListItem);
   });
 
   // 🔄 Chat updated
   socketService.on('chat_updated', (data: { chat: Chat }) => {
-    chatStore.updateChat(data.chat);
+    const chatListItem = {
+      id: data.chat.id,
+      name: data.chat.display_name,
+      display_name: data.chat.display_name,
+      image: data.chat.image,
+      display_image: data.chat.display_image,
+      chat_type: data.chat.chat_type,
+      description: data.chat.description,
+      unread_count: data.chat.unread_count,
+      updated_at: data.chat.updated_at,
+    };
+    chatStore.updateChat(chatListItem);
   });
 
   // ➕ Participant added to chat
   socketService.on('participant_added', (data: {
-    chat_id: string;
+    chat_id: number; // Changed from string to number
     user: User;
   }) => {
     chatStore.addParticipant(data.chat_id, data.user);
@@ -110,7 +129,7 @@ export const setupChatEvents = () => {
 
   // ➖ Participant removed from chat
   socketService.on('participant_removed', (data: {
-    chat_id: string;
+    chat_id: number; // Changed from string to number
     user_id: number;
   }) => {
     chatStore.removeParticipant(data.chat_id, data.user_id);
@@ -118,7 +137,7 @@ export const setupChatEvents = () => {
 
   // 👥 User left chat
   socketService.on('user_left_chat', (data: {
-    chat_id: string;
+    chat_id: number; // Changed from string to number
     user_id: number;
   }) => {
     chatStore.removeParticipant(data.chat_id, data.user_id);
@@ -126,7 +145,7 @@ export const setupChatEvents = () => {
 
   // ✍️ Typing indicator
   socketService.on('user_typing', (data: {
-    chat_id: string;
+    chat_id: number; // Changed from string to number
     user_id: number;
     is_typing: boolean;
   }) => {
@@ -165,17 +184,17 @@ export const setupChatEvents = () => {
 
   // ---------- EMITTERS ----------
 
-  const emitTyping = (chatId: string, isTyping: boolean) => {
+  const emitTyping = (chatId: number, isTyping: boolean) => { // Changed to number
     socketService.emit('typing', {
       chat_id: chatId,
       is_typing: isTyping,
     });
   };
 
-  const sendMessage = (chatId: string, messageData: {
+  const sendMessage = (chatId: number, messageData: { // Changed to number
     text?: string;
     message_type?: string;
-    reply_to?: string;
+    reply_to?: number;
   }) => {
     socketService.emit('send_message', {
       chat_id: chatId,
@@ -183,46 +202,46 @@ export const setupChatEvents = () => {
     });
   };
 
-  const editMessage = (messageId: string, text: string) => {
+  const editMessage = (messageId: number, text: string) => { // Changed to number
     socketService.emit('edit_message', {
       message_id: messageId,
       text: text,
     });
   };
 
-  const deleteMessage = (messageId: string) => {
+  const deleteMessage = (messageId: number) => { // Changed to number
     socketService.emit('delete_message', {
       message_id: messageId,
     });
   };
 
-  const reactToMessage = (messageId: string, emoji: string) => {
+  const reactToMessage = (messageId: number, emoji: string) => { // Changed to number
     socketService.emit('react_to_message', {
       message_id: messageId,
       emoji: emoji,
     });
   };
 
-  const removeReaction = (messageId: string) => {
+  const removeReaction = (messageId: number) => { // Changed to number
     socketService.emit('remove_reaction', {
       message_id: messageId,
     });
   };
 
-  const forwardMessage = (messageId: string, chatId: string) => {
+  const forwardMessage = (messageId: number, chatId: number) => { // Changed to number
     socketService.emit('forward_message', {
       message_id: messageId,
       chat_id: chatId,
     });
   };
 
-  const markAsRead = (messageId: string) => {
+  const markAsRead = (messageId: number) => { // Changed to number
     socketService.emit('mark_as_read', {
       message_id: messageId,
     });
   };
 
-  const markAllAsRead = (chatId: string) => {
+  const markAllAsRead = (chatId: number) => { // Changed to number
     socketService.emit('mark_all_as_read', {
       chat_id: chatId,
     });
@@ -265,11 +284,11 @@ export const setupChatEvents = () => {
     createPrivateChat,
     
     // Room management
-    joinChat: (chatId: string) => {
+    joinChat: (chatId: number) => { // Changed to number
       socketService.emit('join_chat', { chat_id: chatId });
     },
     
-    leaveChat: (chatId: string) => {
+    leaveChat: (chatId: number) => { // Changed to number
       socketService.emit('leave_chat', { chat_id: chatId });
     },
   };

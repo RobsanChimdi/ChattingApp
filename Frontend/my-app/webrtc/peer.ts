@@ -44,24 +44,24 @@ export interface ConnectionQuality {
 }
 
 class WebRTCPeer {
-  private connections: Map<string, PeerConnection> = new Map();
+  private connections: Map<number, PeerConnection> = new Map(); // Changed to number
   private localStream?: MediaStream;
   private configuration: RTCConfiguration;
   private statsInterval: NodeJS.Timeout | null = null;
-  private connectionQualities: Map<string, ConnectionQuality> = new Map();
+  private connectionQualities: Map<number, ConnectionQuality> = new Map(); // Changed to number
 
   // Event callbacks
-  public onRemoteStream: ((peerId: string, stream: MediaStream) => void) | null = null;
-  public onRemoteStreamEnded: ((peerId: string) => void) | null = null;
-  public onDataChannelMessage: ((peerId: string, message: DataChannelMessage) => void) | null = null;
-  public onDataChannelOpen: ((peerId: string) => void) | null = null;
-  public onDataChannelClose: ((peerId: string) => void) | null = null;
-  public onPeerConnected: ((peerId: string) => void) | null = null;
-  public onPeerDisconnected: ((peerId: string) => void) | null = null;
-  public onIceCandidate: ((peerId: string, candidate: RTCIceCandidate) => void) | null = null;
-  public onNegotiationNeeded: ((peerId: string) => void) | null = null;
-  public onSignalingStateChange: ((peerId: string, state: RTCSignalingState) => void) | null = null;
-  public onConnectionQuality: ((peerId: string, quality: ConnectionQuality) => void) | null = null;
+  public onRemoteStream: ((peerId: number, stream: MediaStream) => void) | null = null;
+  public onRemoteStreamEnded: ((peerId: number) => void) | null = null;
+  public onDataChannelMessage: ((peerId: number, message: DataChannelMessage) => void) | null = null;
+  public onDataChannelOpen: ((peerId: number) => void) | null = null;
+  public onDataChannelClose: ((peerId: number) => void) | null = null;
+  public onPeerConnected: ((peerId: number) => void) | null = null;
+  public onPeerDisconnected: ((peerId: number) => void) | null = null;
+  public onIceCandidate: ((peerId: number, candidate: RTCIceCandidate) => void) | null = null;
+  public onNegotiationNeeded: ((peerId: number) => void) | null = null;
+  public onSignalingStateChange: ((peerId: number, state: RTCSignalingState) => void) | null = null;
+  public onConnectionQuality: ((peerId: number, quality: ConnectionQuality) => void) | null = null;
 
   constructor(config?: RTCConfiguration) {
     this.configuration = {
@@ -83,7 +83,6 @@ class WebRTCPeer {
       throw new Error('WebRTC is not supported in this browser');
     }
 
-    // Start stats collection
     this.startStatsCollection();
   }
 
@@ -93,7 +92,6 @@ class WebRTCPeer {
               window.RTCIceCandidate);
   }
 
-  // Initialize local media
   async initializeLocalStream(constraints: MediaConstraints = {
     audio: true,
     video: true,
@@ -107,9 +105,7 @@ class WebRTCPeer {
     }
   }
 
-  // Create peer connection
-  async createPeerConnection(peerId: string, config: Partial<PeerConfig> = {}): Promise<RTCPeerConnection> {
-    // Close existing connection if any
+  async createPeerConnection(peerId: number, config: Partial<PeerConfig> = {}): Promise<RTCPeerConnection> {
     if (this.connections.has(peerId)) {
       this.closeConnection(peerId);
     }
@@ -119,23 +115,19 @@ class WebRTCPeer {
       iceServers: config.iceServers || this.configuration.iceServers,
     });
 
-    // Setup event handlers
     this.setupPeerConnectionEvents(pc, peerId, config.isInitiator || false);
 
-    // Add local stream tracks if available
     const stream = config.mediaStream || this.localStream;
     if (stream) {
       this.addLocalStreamToConnection(pc, stream);
     }
 
-    // Create or setup data channel
     if (config.isInitiator) {
       this.createDataChannel(pc, peerId, config.dataChannelConfig);
     }
 
-    // Store connection
     this.connections.set(peerId, {
-      peerId,
+      peerId: peerId.toString(),
       pc,
       isConnected: false,
       iceCandidates: [],
@@ -145,8 +137,7 @@ class WebRTCPeer {
     return pc;
   }
 
-  private setupPeerConnectionEvents(pc: RTCPeerConnection, peerId: string, isInitiator: boolean): void {
-    // ICE candidate handling
+  private setupPeerConnectionEvents(pc: RTCPeerConnection, peerId: number, isInitiator: boolean): void {
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         const conn = this.connections.get(peerId);
@@ -158,12 +149,10 @@ class WebRTCPeer {
           this.onIceCandidate(peerId, event.candidate);
         }
       } else {
-        // No more candidates
         console.log(`ICE gathering complete for ${peerId}`);
       }
     };
 
-    // ICE connection state change
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
       console.log(`ICE connection state for ${peerId}:`, state);
@@ -199,12 +188,10 @@ class WebRTCPeer {
       }
     };
 
-    // ICE gathering state change
     pc.onicegatheringstatechange = () => {
       console.log(`ICE gathering state for ${peerId}:`, pc.iceGatheringState);
     };
 
-    // Signaling state change
     pc.onsignalingstatechange = () => {
       console.log(`Signaling state for ${peerId}:`, pc.signalingState);
       if (this.onSignalingStateChange) {
@@ -212,7 +199,6 @@ class WebRTCPeer {
       }
     };
 
-    // Negotiation needed
     pc.onnegotiationneeded = async () => {
       const conn = this.connections.get(peerId);
       if (!conn || conn.isNegotiating) return;
@@ -227,7 +213,6 @@ class WebRTCPeer {
       }
     };
 
-    // Track handling for remote streams
     pc.ontrack = (event) => {
       console.log('Received remote track from:', peerId, event.track.kind);
       
@@ -238,7 +223,6 @@ class WebRTCPeer {
           conn.stream = stream;
         }
         
-        // Listen for track ended
         event.track.onended = () => {
           console.log(`Track ended for ${peerId}`);
           if (this.onRemoteStreamEnded) {
@@ -252,7 +236,6 @@ class WebRTCPeer {
       }
     };
 
-    // Data channel
     if (!isInitiator) {
       pc.ondatachannel = (event) => {
         this.setupDataChannel(event.channel, peerId);
@@ -265,16 +248,14 @@ class WebRTCPeer {
       const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
       
       if (sender) {
-        // Replace existing track
         sender.replaceTrack(track);
       } else {
-        // Add new track
         pc.addTrack(track, stream);
       }
     });
   }
 
-  private createDataChannel(pc: RTCPeerConnection, peerId: string, config?: RTCDataChannelInit): void {
+  private createDataChannel(pc: RTCPeerConnection, peerId: number, config?: RTCDataChannelInit): void {
     const dataChannel = pc.createDataChannel('data', {
       ordered: true,
       maxPacketLifeTime: 3000,
@@ -292,7 +273,7 @@ class WebRTCPeer {
     }
   }
 
-  private setupDataChannel(channel: RTCDataChannel, peerId: string): void {
+  private setupDataChannel(channel: RTCDataChannel, peerId: number): void {
     channel.onopen = () => {
       console.log(`Data channel opened for ${peerId}`);
       const conn = this.connections.get(peerId);
@@ -343,8 +324,7 @@ class WebRTCPeer {
     }
   }
 
-  // Create offer
-  async createOffer(peerId: string, options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit> {
+  async createOffer(peerId: number, options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit> {
     const conn = this.connections.get(peerId);
     if (!conn) {
       throw new Error(`No connection found for peer: ${peerId}`);
@@ -367,8 +347,7 @@ class WebRTCPeer {
     }
   }
 
-  // Create answer
-  async createAnswer(peerId: string, offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit> {
+  async createAnswer(peerId: number, offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit> {
     const conn = this.connections.get(peerId);
     if (!conn) {
       throw new Error(`No connection found for peer: ${peerId}`);
@@ -385,8 +364,7 @@ class WebRTCPeer {
     }
   }
 
-  // Set remote description
-  async setRemoteDescription(peerId: string, description: RTCSessionDescriptionInit): Promise<void> {
+  async setRemoteDescription(peerId: number, description: RTCSessionDescriptionInit): Promise<void> {
     const conn = this.connections.get(peerId);
     if (!conn) {
       throw new Error(`No connection found for peer: ${peerId}`);
@@ -395,7 +373,6 @@ class WebRTCPeer {
     try {
       await conn.pc.setRemoteDescription(new RTCSessionDescription(description));
       
-      // Add pending ICE candidates
       for (const candidate of conn.iceCandidates) {
         await conn.pc.addIceCandidate(candidate);
       }
@@ -406,33 +383,27 @@ class WebRTCPeer {
     }
   }
 
-  // Add ICE candidate
-  async addIceCandidate(peerId: string, candidate: RTCIceCandidateInit): Promise<void> {
+  async addIceCandidate(peerId: number, candidateInit: RTCIceCandidateInit): Promise<void> {
     const conn = this.connections.get(peerId);
     if (!conn) {
-      // Store candidate for later if connection doesn't exist yet
       const newConn = this.connections.get(peerId);
       if (newConn) {
-        newConn.iceCandidates.push(new RTCIceCandidate(candidate));
+        newConn.iceCandidates.push(new RTCIceCandidate(candidateInit));
       }
       return;
     }
 
     try {
-      await conn.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      await conn.pc.addIceCandidate(new RTCIceCandidate(candidateInit));
     } catch (error) {
       console.error('Error adding ICE candidate:', error);
-      // Store candidate for later if remote description not set yet
-      if (conn.pc.remoteDescription) {
-        throw error;
-      } else {
-        conn.iceCandidates.push(new RTCIceCandidate(candidate));
+      if (!conn.pc.remoteDescription) {
+        conn.iceCandidates.push(new RTCIceCandidate(candidateInit));
       }
     }
   }
 
-  // Send message via data channel
-  sendDataMessage(peerId: string, message: any): boolean {
+  sendDataMessage(peerId: number, message: any): boolean {
     const conn = this.connections.get(peerId);
     if (!conn || !conn.dataChannel || conn.dataChannel.readyState !== 'open') {
       return false;
@@ -453,13 +424,11 @@ class WebRTCPeer {
     }
   }
 
-  // Update local stream
   async updateLocalStream(constraints?: MediaConstraints): Promise<void> {
     if (constraints) {
       this.localStream = await mediaService.getLocalStream(constraints);
     }
 
-    // Update all active connections
     this.connections.forEach(conn => {
       if (this.localStream) {
         this.addLocalStreamToConnection(conn.pc, this.localStream);
@@ -467,7 +436,6 @@ class WebRTCPeer {
     });
   }
 
-  // Toggle audio
   toggleAudio(enabled: boolean): void {
     if (this.localStream) {
       this.localStream.getAudioTracks().forEach(track => {
@@ -476,7 +444,6 @@ class WebRTCPeer {
     }
   }
 
-  // Toggle video
   toggleVideo(enabled: boolean): void {
     if (this.localStream) {
       this.localStream.getVideoTracks().forEach(track => {
@@ -485,8 +452,7 @@ class WebRTCPeer {
     }
   }
 
-  // Get connection stats
-  async getConnectionStats(peerId: string): Promise<ConnectionStats> {
+  async getConnectionStats(peerId: number): Promise<ConnectionStats> {
     const conn = this.connections.get(peerId);
     if (!conn) {
       throw new Error(`No connection found for peer: ${peerId}`);
@@ -521,8 +487,7 @@ class WebRTCPeer {
     }
   }
 
-  // Collect connection quality metrics
-  private async collectConnectionQuality(peerId: string): Promise<void> {
+  private async collectConnectionQuality(peerId: number): Promise<void> {
     try {
       const stats = await this.getConnectionStats(peerId);
       const quality: ConnectionQuality = {
@@ -575,21 +540,19 @@ class WebRTCPeer {
       this.connections.forEach((_, peerId) => {
         this.collectConnectionQuality(peerId);
       });
-    }, 5000); // Collect stats every 5 seconds
+    }, 5000);
   }
 
-  private handleConnectionFailure(peerId: string): void {
+  private handleConnectionFailure(peerId: number): void {
     const conn = this.connections.get(peerId);
     if (!conn) return;
 
-    // Attempt to restart ICE
     try {
       conn.pc.restartIce();
     } catch (error) {
       console.error('Error restarting ICE:', error);
     }
 
-    // If still failing after timeout, close connection
     setTimeout(() => {
       if (conn.pc.iceConnectionState === 'failed') {
         this.closeConnection(peerId);
@@ -597,8 +560,7 @@ class WebRTCPeer {
     }, 5000);
   }
 
-  // Close specific connection
-  closeConnection(peerId: string): void {
+  closeConnection(peerId: number): void {
     const conn = this.connections.get(peerId);
     if (conn) {
       conn.pc.close();
@@ -614,7 +576,6 @@ class WebRTCPeer {
     }
   }
 
-  // Close all connections and cleanup
   destroy(): void {
     if (this.statsInterval) {
       clearInterval(this.statsInterval);
@@ -630,53 +591,44 @@ class WebRTCPeer {
     
     if (this.localStream) {
       mediaService.stopLocalStream();
+      this.localStream = undefined;
     }
   }
 
-  // Get all active connections
   getActiveConnections(): PeerConnection[] {
     return Array.from(this.connections.values());
   }
 
-  // Check if connection exists
-  hasConnection(peerId: string): boolean {
+  hasConnection(peerId: number): boolean {
     return this.connections.has(peerId);
   }
 
-  // Get connection by peerId
-  getConnection(peerId: string): PeerConnection | undefined {
+  getConnection(peerId: number): PeerConnection | undefined {
     return this.connections.get(peerId);
   }
 
-  // Get connection quality
-  getConnectionQuality(peerId: string): ConnectionQuality | undefined {
+  getConnectionQuality(peerId: number): ConnectionQuality | undefined {
     return this.connectionQualities.get(peerId);
   }
 
-  // Get local stream
   getLocalStream(): MediaStream | undefined {
     return this.localStream;
   }
 
-  // Set local stream
   setLocalStream(stream: MediaStream): void {
     this.localStream = stream;
   }
 
-  // Reconnect to peer
-  async reconnect(peerId: string): Promise<RTCPeerConnection> {
+  async reconnect(peerId: number): Promise<RTCPeerConnection> {
     const oldConn = this.connections.get(peerId);
     if (!oldConn) {
       throw new Error(`No connection found for peer: ${peerId}`);
     }
 
-    // Store old connection state
     const wasInitiator = oldConn.dataChannel?.readyState === 'open';
     
-    // Close old connection
     this.closeConnection(peerId);
     
-    // Create new connection
     return this.createPeerConnection(peerId, {
       isInitiator: wasInitiator,
       mediaStream: this.localStream,
