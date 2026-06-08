@@ -1,13 +1,13 @@
 # views.py
 from django.shortcuts import get_object_or_404
-from django.db.models import Q, Count, Sum, Case, When, IntegerField
-from django.db import models, connection
+from django.db.models import Q, Count, Sum, Case, When, IntegerField, Prefetch
+from django.db import models, connection, transaction
 from django.utils import timezone
 from django.contrib.auth import get_user_model, authenticate
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.cache import cache
-from django.db import transaction
 from django.core.mail import send_mail
+from django.conf import settings
 
 from rest_framework import viewsets, generics, status, permissions, filters
 from rest_framework.decorators import action, api_view, permission_classes
@@ -18,6 +18,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.authtoken.models import Token
+from rest_framework.throttling import UserRateThrottle, AnonRateThrottle
 
 from uuid import uuid4
 from datetime import timedelta
@@ -41,6 +42,15 @@ from .serializers import (
 # Set up logging
 logger = logging.getLogger(__name__)
 
+# Try to import psutil for disk health checks
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    psutil = None
+
+
 # Define a standard pagination class
 class StandardPagination(PageNumberPagination):
     page_size = 20
@@ -52,14 +62,15 @@ class StandardPagination(PageNumberPagination):
 class RegisterView(generics.CreateAPIView):
     permission_classes = [AllowAny]
     serializer_class = UserSerializer
+    throttle_classes = [AnonRateThrottle]
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save(is_verified=False)  # User starts as not verified
+        user = serializer.save(is_verified=False)
 
         # Generate verification code
-        code = str(uuid4().int)[:6]  # 6-digit code
+        code = str(uuid4().int)[:6]
         user.verification_code = code
         user.save()
 
@@ -68,13 +79,12 @@ class RegisterView(generics.CreateAPIView):
             send_mail(
                 subject="Verify Your Account",
                 message=f"Your verification code is: {code}",
-                from_email="noreply@yourapp.com",
+                from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
                 fail_silently=False
             )
         except Exception as e:
             logger.error(f"Failed to send verification email to {user.email}: {str(e)}")
-            # Continue even if email fails - user can request code again
 
         return Response(
             {
@@ -89,6 +99,7 @@ class RegisterView(generics.CreateAPIView):
 class VerifyEmailView(APIView):
     permission_classes = [AllowAny]
     serializer_class = EmailVerificationSerializer
+    throttle_classes = [AnonRateThrottle]
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
@@ -122,6 +133,7 @@ class VerifyEmailView(APIView):
 
 class ResendVerificationCodeView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
     
     def post(self, request):
         email = request.data.get('email')
@@ -150,7 +162,7 @@ class ResendVerificationCodeView(APIView):
             send_mail(
                 subject="Verify Your Account",
                 message=f"Your new verification code is: {code}",
-                from_email="noreply@yourapp.com",
+                from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email]
             )
         except Exception as e:
@@ -163,6 +175,7 @@ class ResendVerificationCodeView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
 
     def post(self, request):
         username = request.data.get('username')
@@ -192,6 +205,16 @@ class LoginView(APIView):
         user.update_last_seen()
 
         token, _ = Token.objects.get_or_create(user=user)
+        
+        # Cache user data for faster access
+        cache_key = f'user_data_{user.id}'
+        cache.set(cache_key, {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'is_online': user.is_online
+        }, 300)  # Cache for 5 minutes
+        
         return Response({
             'token': token.key, 
             'user': UserSerializer(user).data,
@@ -202,6 +225,7 @@ class LoginView(APIView):
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
     serializer_class = PasswordResetRequestSerializer
+    throttle_classes = [AnonRateThrottle]
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
@@ -226,7 +250,7 @@ class PasswordResetRequestView(APIView):
             send_mail(
                 subject="Password Reset",
                 message=f"Your password reset token is: {token}",
-                from_email="noreply@yourapp.com",
+                from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email]
             )
         except Exception as e:
@@ -264,6 +288,9 @@ class PasswordResetConfirmView(APIView):
         
         # Delete all existing tokens for this user
         Token.objects.filter(user=user).delete()
+        
+        # Clear cache
+        cache.delete(f'user_data_{user.id}')
 
         return Response({"status": "password_reset_success"})
 
@@ -281,6 +308,9 @@ class LogoutView(APIView):
         except (Token.DoesNotExist, AttributeError):
             pass
         
+        # Clear cache
+        cache.delete(f'user_data_{request.user.id}')
+        
         return Response({'status': 'logged_out'})
 
 
@@ -288,12 +318,9 @@ class WebSocketTokenView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        token, created = Token.objects.get_or_create(user=request.user)
-        return Response({
-            'token': token.key,
-            'user_id': request.user.id,
-            'username': request.user.username
-        })
+        # Generate WebSocket token
+        token_data = request.user.generate_websocket_token()
+        return Response(token_data)
 
 
 # ========== USER VIEWS ==========
@@ -322,7 +349,7 @@ class UpdateProfileView(generics.UpdateAPIView):
                 raise ValidationError("Profile image cannot exceed 5MB")
             
             # Validate file type
-            valid_types = ['image/jpeg', 'image/png', 'image/gif']
+            valid_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
             if profile_image.content_type not in valid_types:
                 raise ValidationError(f"Invalid image type. Allowed: {', '.join(valid_types)}")
             
@@ -331,6 +358,9 @@ class UpdateProfileView(generics.UpdateAPIView):
                 self.request.user.profile_image.delete(save=False)
         
         serializer.save()
+        
+        # Clear user cache
+        cache.delete(f'user_data_{self.request.user.id}')
 
 
 class UserSearchView(generics.ListAPIView):
@@ -345,12 +375,24 @@ class UserSearchView(generics.ListAPIView):
         if not query or len(query) < 2:
             return User.objects.none()
         
-        return User.objects.filter(
+        # Check cache for search results
+        cache_key = f'user_search_{query}_{self.request.user.id}'
+        cached_result = cache.get(cache_key)
+        
+        if cached_result is not None:
+            return cached_result
+        
+        queryset = User.objects.filter(
             Q(username__icontains=query) |
             Q(email__icontains=query) |
             Q(first_name__icontains=query) |
             Q(last_name__icontains=query)
-        ).exclude(id=self.request.user.id).filter(is_active=True)[:50]  # Limit results
+        ).exclude(id=self.request.user.id).filter(is_active=True)[:50]
+        
+        # Cache for 30 seconds
+        cache.set(cache_key, queryset, 30)
+        
+        return queryset
 
 
 class UserDetailView(generics.RetrieveAPIView):
@@ -369,6 +411,13 @@ class UserOnlineStatusView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, user_id):
+        # Check cache first
+        cache_key = f'user_status_{user_id}_{request.user.id}'
+        cached_data = cache.get(cache_key)
+        
+        if cached_data:
+            return Response(cached_data)
+        
         try:
             user = User.objects.get(id=user_id, is_active=True)
         except User.DoesNotExist:
@@ -399,6 +448,9 @@ class UserOnlineStatusView(APIView):
         else:
             response_data['last_seen'] = user.last_seen
         
+        # Cache for 30 seconds
+        cache.set(cache_key, response_data, 30)
+        
         return Response(response_data)
 
 
@@ -407,6 +459,8 @@ class UpdateLastSeenView(APIView):
     
     def post(self, request):
         request.user.update_last_seen()
+        # Clear status cache
+        cache.delete_pattern(f'user_status_{request.user.id}_*')
         return Response({'status': 'last_seen_updated'})
 
 
@@ -415,6 +469,9 @@ class SetOfflineView(APIView):
     
     def post(self, request):
         request.user.set_offline()
+        # Clear status cache
+        cache.delete_pattern(f'user_status_{request.user.id}_*')
+        cache.delete(f'user_data_{request.user.id}')
         return Response({'status': 'offline'})
 
 
@@ -497,19 +554,36 @@ class CreatePrivateChatView(APIView):
             return Response({"error": "User not found"}, 
                           status=status.HTTP_404_NOT_FOUND)
         
-        # Check if private chat already exists (optimized query)
+        # Check cache for existing chat
+        cache_key = f'private_chat_{min(request.user.id, participant.id)}_{max(request.user.id, participant.id)}'
+        existing_chat_id = cache.get(cache_key)
+        
+        if existing_chat_id:
+            try:
+                existing_chat = Chat.objects.get(id=existing_chat_id)
+                serializer = ChatSerializer(existing_chat, context={'request': request})
+                return Response(serializer.data)
+            except Chat.DoesNotExist:
+                cache.delete(cache_key)
+        
+        # Check if private chat already exists
         existing_chat = Chat.objects.filter(
             chat_type='private',
             participants=request.user
         ).filter(participants=participant).first()
         
         if existing_chat:
+            # Cache the result
+            cache.set(cache_key, existing_chat.id, 3600)
             serializer = ChatSerializer(existing_chat, context={'request': request})
             return Response(serializer.data)
         
         # Create new private chat
         chat = Chat.objects.create(chat_type='private')
         chat.participants.add(request.user, participant)
+        
+        # Cache the new chat
+        cache.set(cache_key, chat.id, 3600)
         
         serializer = ChatSerializer(chat, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -551,6 +625,9 @@ class AddParticipantView(APIView):
             chat.admin = user
             chat.save()
         
+        # Clear chat cache
+        cache.delete(f'chat_{chat.id}')
+        
         return Response({"status": "participant_added"})
 
 
@@ -588,6 +665,10 @@ class RemoveParticipantView(APIView):
                           status=status.HTTP_400_BAD_REQUEST)
         
         chat.participants.remove(user)
+        
+        # Clear chat cache
+        cache.delete(f'chat_{chat.id}')
+        
         return Response({"status": "participant_removed"})
 
 
@@ -622,6 +703,9 @@ class LeaveChatView(APIView):
             chat.is_active = False
             chat.save()
         
+        # Clear chat cache
+        cache.delete(f'chat_{chat.id}')
+        
         return Response({"status": "left_chat"})
 
 
@@ -650,6 +734,11 @@ class UpdateChatInfoView(generics.UpdateAPIView):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+    
+    def perform_update(self, serializer):
+        serializer.save()
+        # Clear chat cache
+        cache.delete(f'chat_{self.kwargs.get("chat_id")}')
 
 
 class ChatMessagesView(generics.ListAPIView):
@@ -708,6 +797,13 @@ class UnreadMessageCountView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        # Check cache first
+        cache_key = f'unread_counts_{request.user.id}'
+        cached_counts = cache.get(cache_key)
+        
+        if cached_counts is not None:
+            return Response(cached_counts)
+        
         # Optimized query using annotations
         chats = Chat.objects.filter(
             participants=request.user,
@@ -726,7 +822,11 @@ class UnreadMessageCountView(APIView):
             )
         ).values('id', 'unread')
         
-        counts = {chat['id']: chat['unread'] for chat in chats}
+        counts = {str(chat['id']): chat['unread'] for chat in chats}
+        
+        # Cache for 10 seconds
+        cache.set(cache_key, counts, 10)
+        
         return Response(counts)
 
 
@@ -798,6 +898,10 @@ class MessageCreateView(generics.CreateAPIView):
             )
             media_objects.append(media)
         
+        # Clear unread count cache for all participants
+        for participant in chat.participants.all():
+            cache.delete(f'unread_counts_{participant.id}')
+        
         # Return complete message with media
         response_serializer = self.get_serializer(message)
         response_data = response_serializer.data
@@ -861,6 +965,10 @@ class MediaUploadView(generics.CreateAPIView):
                 )
                 request.data['message'] = message.id
                 
+                # Clear unread count cache
+                for participant in chat.participants.all():
+                    cache.delete(f'unread_counts_{participant.id}')
+                
             except Chat.DoesNotExist:
                 return Response({"error": "Chat not found"}, 
                               status=status.HTTP_404_NOT_FOUND)
@@ -891,6 +999,10 @@ class MessageDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.deleted_at = timezone.now()
         instance.deleted_by = self.request.user
         instance.save()
+        
+        # Clear unread count cache
+        for participant in instance.chat.participants.all():
+            cache.delete(f'unread_counts_{participant.id}')
 
 
 class MessageReactionView(generics.CreateAPIView):
@@ -983,7 +1095,6 @@ class ForwardMessageView(APIView):
         
         # Copy media if any
         for media in original_message.media.all():
-            # This assumes the file is already stored and accessible
             MessageMedia.objects.create(
                 message=forwarded_message,
                 file=media.file,
@@ -995,6 +1106,10 @@ class ForwardMessageView(APIView):
                 height=media.height,
                 thumbnail=media.thumbnail
             )
+        
+        # Clear unread count cache for target chat participants
+        for participant in target_chat.participants.all():
+            cache.delete(f'unread_counts_{participant.id}')
         
         serializer = MessageSerializer(forwarded_message, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1105,8 +1220,7 @@ class LeaveCallView(APIView):
         
         try:
             participant = call.participants.get(user=request.user)
-            participant.left_at = timezone.now()
-            participant.save()
+            participant.leave_call()
             
             # If no active participants left, end the call
             active_count = call.participants.filter(left_at__isnull=True).count()
@@ -1308,12 +1422,19 @@ class UserStatisticsView(APIView):
     def get(self, request):
         user = request.user
         
+        # Check cache
+        cache_key = f'user_stats_{user.id}'
+        cached_stats = cache.get(cache_key)
+        
+        if cached_stats:
+            return Response(cached_stats)
+        
         # Message statistics (optimized with single query)
         message_stats = Message.objects.filter(sender=user).aggregate(
             total=models.Count('id'),
             sent_today=models.Count('id', filter=models.Q(created_at__date=timezone.now().date())),
             recent_week=models.Count('id', filter=models.Q(
-                created_at__gte=timezone.now() - timezone.timedelta(days=7)
+                created_at__gte=timezone.now() - timedelta(days=7)
             ))
         )
         
@@ -1331,7 +1452,7 @@ class UserStatisticsView(APIView):
         )
         total_duration = call_stats['total_duration'] or 0
         
-        return Response({
+        response_data = {
             'user': {
                 'username': user.username,
                 'date_joined': user.date_joined,
@@ -1354,7 +1475,12 @@ class UserStatisticsView(APIView):
                 'total_duration_seconds': total_duration,
                 'total_duration_hours': round(total_duration / 3600, 2) if total_duration else 0
             }
-        })
+        }
+        
+        # Cache for 5 minutes
+        cache.set(cache_key, response_data, 300)
+        
+        return Response(response_data)
 
 
 # ========== HEALTH CHECK VIEW ==========
@@ -1382,17 +1508,21 @@ class HealthCheckView(APIView):
             cache_status = f'error: {str(e)}'
             logger.error(f"Cache health check failed: {str(e)}")
         
-        # Check disk space (optional)
+        # Check disk space
         disk_status = 'ok'
-        try:
-            import psutil
-            disk_usage = psutil.disk_usage('/')
-            if disk_usage.percent > 90:
-                disk_status = f'warning: {disk_usage.percent}% used'
-        except ImportError:
-            disk_status = 'unknown (psutil not installed)'
-        except Exception as e:
-            disk_status = f'error: {str(e)}'
+        if PSUTIL_AVAILABLE:
+            try:
+                disk_usage = psutil.disk_usage('/')
+                disk_percent = disk_usage.percent
+                if disk_percent > 90:
+                    disk_status = f'warning: {disk_percent}% used'
+                else:
+                    disk_status = f'{disk_percent}% used'
+            except Exception as e:
+                disk_status = f'error: {str(e)}'
+                logger.error(f"Disk health check failed: {str(e)}")
+        else:
+            disk_status = 'unavailable (install psutil for disk monitoring)'
         
         return Response({
             'status': 'healthy' if db_status == 'connected' else 'unhealthy',

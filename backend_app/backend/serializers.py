@@ -2,9 +2,9 @@ from rest_framework import serializers
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 import os
-from .models import User, Chat, Message, MessageMedia, MessageStatus, MessageReaction, Call, CallParticipant, CallQuality
-from django.contrib.auth.password_validation import validate_password
 import mimetypes
+from django.contrib.auth.password_validation import validate_password
+from .models import User, Chat, Message, MessageMedia, MessageStatus, MessageReaction, Call, CallParticipant, CallQuality
 
 
 # ========== USER SERIALIZERS ==========
@@ -39,12 +39,10 @@ class UserSerializer(serializers.ModelSerializer):
             last_name=validated_data.get('last_name', ''),
             bio=validated_data.get('bio', ''),
             phone_number=validated_data.get('phone_number', ''),
-            status=validated_data.get('status', ''),
+            status=validated_data.get('status', 'Hey there! I\'m using ChatApp'),
             privacy_last_seen=validated_data.get('privacy_last_seen', 'everyone')
         )
-        # Optional: generate verification code
-        if hasattr(user, 'generate_verification_code'):
-            user.generate_verification_code()
+        user.generate_verification_code()
         return user
 
 
@@ -73,14 +71,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         return None
     
     def get_display_name(self, obj):
-        """Get display name for user"""
-        if obj.first_name and obj.last_name:
-            return f"{obj.first_name} {obj.last_name}"
-        elif obj.first_name:
-            return obj.first_name
-        elif obj.last_name:
-            return obj.last_name
-        return obj.username
+        return obj.get_display_name()
 
 
 class LoginSerializer(serializers.Serializer):
@@ -159,7 +150,7 @@ class MessageMediaSerializer(serializers.ModelSerializer):
         return None
     
     def get_formatted_size(self, obj):
-        return obj.formatted_size if hasattr(obj, 'formatted_size') else self._format_size(obj.file_size)
+        return obj.formatted_size
     
     def get_file_type(self, obj):
         if obj.mime_type:
@@ -173,18 +164,9 @@ class MessageMediaSerializer(serializers.ModelSerializer):
                 return 'document'
         return 'unknown'
     
-    def _format_size(self, size):
-        if not size:
-            return "0 B"
-        for unit in ['B', 'KB', 'MB', 'GB']:
-            if size < 1024.0:
-                return f"{size:.1f} {unit}"
-            size /= 1024.0
-        return f"{size:.1f} TB"
-    
     def validate_file(self, value):
         # Check file size (max 50MB)
-        max_size = 50 * 1024 * 1024  # 50MB
+        max_size = 50 * 1024 * 1024
         if value.size > max_size:
             raise serializers.ValidationError(
                 f"File size cannot exceed {max_size / (1024 * 1024)}MB"
@@ -193,7 +175,7 @@ class MessageMediaSerializer(serializers.ModelSerializer):
         # Auto-detect mime type
         mime_type, _ = mimetypes.guess_type(value.name)
         
-        # Define valid extensions (simplified)
+        # Define valid extensions (lowercase for comparison)
         valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', 
                            '.mp3', '.wav', '.pdf', '.doc', '.docx', '.txt')
         
@@ -226,6 +208,7 @@ class MessageStatusSerializer(serializers.ModelSerializer):
         return {
             'id': obj.user.id,
             'username': obj.user.username,
+            'display_name': obj.user.get_display_name(),
             'profile_image': obj.user.profile_image.url if obj.user.profile_image else None
         }
     
@@ -238,7 +221,6 @@ class MessageStatusSerializer(serializers.ModelSerializer):
                 "User must be a participant in the chat."
             )
         
-        # Validate status transitions if updating
         if self.instance:
             current_status = self.instance.status
             new_status = data.get('status', current_status)
@@ -275,6 +257,7 @@ class MessageReactionSerializer(serializers.ModelSerializer):
         return {
             'id': obj.user.id,
             'username': obj.user.username,
+            'display_name': obj.user.get_display_name(),
             'profile_image': obj.user.profile_image.url if obj.user.profile_image else None
         }
     
@@ -324,6 +307,7 @@ class MessageSummarySerializer(serializers.ModelSerializer):
         return {
             'id': obj.sender.id,
             'username': obj.sender.username,
+            'display_name': obj.sender.get_display_name(),
             'profile_image': obj.sender.profile_image.url if obj.sender.profile_image else None
         }
     
@@ -338,17 +322,10 @@ class MessageSummarySerializer(serializers.ModelSerializer):
         return None
     
     def get_media_count(self, obj):
-        return obj.media.count() if hasattr(obj, 'media') else 0
+        return obj.media.count()
     
     def get_reactions_summary(self, obj):
-        if hasattr(obj, 'reaction_summary'):
-            return obj.reaction_summary
-        # Calculate if method doesn't exist
-        reactions = obj.reactions.all() if hasattr(obj, 'reactions') else []
-        summary = {}
-        for reaction in reactions:
-            summary[reaction.emoji] = summary.get(reaction.emoji, 0) + 1
-        return summary
+        return obj.reaction_summary
     
     def get_summary(self, obj):
         return self._get_message_summary(obj)
@@ -405,6 +382,7 @@ class MessageSerializer(serializers.ModelSerializer):
         return {
             'id': obj.sender.id,
             'username': obj.sender.username,
+            'display_name': obj.sender.get_display_name(),
             'profile_image': obj.sender.profile_image.url if obj.sender.profile_image else None
         }
     
@@ -430,17 +408,7 @@ class MessageSerializer(serializers.ModelSerializer):
         return None
     
     def get_status_summary(self, obj):
-        """Get delivery/read status summary"""
-        if hasattr(obj, 'status_summary'):
-            return obj.status_summary
-        # Calculate if method doesn't exist
-        statuses = obj.statuses.all() if hasattr(obj, 'statuses') else []
-        return {
-            'sent': sum(1 for s in statuses if s.status == 'sent'),
-            'delivered': sum(1 for s in statuses if s.status == 'delivered'),
-            'read': sum(1 for s in statuses if s.status == 'read'),
-            'failed': sum(1 for s in statuses if s.status == 'failed'),
-        }
+        return obj.status_summary
     
     def validate(self, data):
         chat = data.get('chat')
@@ -448,13 +416,11 @@ class MessageSerializer(serializers.ModelSerializer):
         message_type = data.get('message_type', 'text')
         text = data.get('text', '')
         
-        # Check if sender is a chat participant
         if sender and chat and not chat.participants.filter(id=sender.id).exists():
             raise serializers.ValidationError(
                 "Sender must be a participant in the chat."
             )
         
-        # Validate message content based on type
         if message_type == 'text':
             if not text or not text.strip():
                 raise serializers.ValidationError({"text": "Text message cannot be empty."})
@@ -464,7 +430,6 @@ class MessageSerializer(serializers.ModelSerializer):
                     {"location": "Location messages require latitude and longitude."}
                 )
         
-        # Validate reply_to message
         reply_to = data.get('reply_to')
         if reply_to and reply_to.chat != chat:
             raise serializers.ValidationError(
@@ -474,14 +439,13 @@ class MessageSerializer(serializers.ModelSerializer):
         return data
     
     def create(self, validated_data):
-        # Set sender from request if not provided
         request = self.context.get('request')
         if request and 'sender' not in validated_data:
             validated_data['sender'] = request.user
         
         message = Message.objects.create(**validated_data)
         
-        # Create initial status for all participants except sender
+        # Create status for all participants except sender
         chat_participants = message.chat.participants.exclude(id=message.sender.id)
         for participant in chat_participants:
             MessageStatus.objects.create(
@@ -489,13 +453,6 @@ class MessageSerializer(serializers.ModelSerializer):
                 user=participant,
                 status='sent'
             )
-        
-        # Create status for sender as 'delivered'
-        MessageStatus.objects.create(
-            message=message,
-            user=message.sender,
-            status='delivered'
-        )
         
         return message
 
@@ -526,13 +483,7 @@ class ChatListSerializer(serializers.ModelSerializer):
         if obj.chat_type == 'private':
             other_user = obj.participants.exclude(id=request.user.id).first()
             if other_user:
-                if other_user.first_name and other_user.last_name:
-                    return f"{other_user.first_name} {other_user.last_name}"
-                elif other_user.first_name:
-                    return other_user.first_name
-                elif other_user.last_name:
-                    return other_user.last_name
-                return other_user.username
+                return other_user.get_display_name()
         return obj.name
     
     def get_display_image(self, obj):
@@ -557,13 +508,13 @@ class ChatListSerializer(serializers.ModelSerializer):
         return None
     
     def get_last_message(self, obj):
-        last_msg = obj.messages.filter(is_deleted=False).order_by('-created_at').first()
+        last_msg = obj.messages.filter(is_deleted=False).first()
         if last_msg:
             return {
                 'id': last_msg.id,
                 'sender': last_msg.sender.username,
                 'message_type': last_msg.message_type,
-                'summary': self._get_message_summary(last_msg),
+                'summary': last_msg.get_summary(),
                 'created_at': last_msg.created_at,
                 'is_edited': last_msg.is_edited
             }
@@ -572,11 +523,7 @@ class ChatListSerializer(serializers.ModelSerializer):
     def get_unread_count(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            return obj.messages.filter(
-                ~Q(sender=request.user),
-                statuses__user=request.user,
-                statuses__status__in=['sent', 'delivered']
-            ).count()
+            return obj.unread_count(request.user)
         return 0
     
     def get_participants_info(self, obj):
@@ -584,27 +531,11 @@ class ChatListSerializer(serializers.ModelSerializer):
         return [{
             'id': user.id,
             'username': user.username,
-            'display_name': user.get_display_name() if hasattr(user, 'get_display_name') else user.username,
+            'display_name': user.get_display_name(),
             'profile_image': user.profile_image.url if user.profile_image else None,
             'is_online': user.is_online,
             'last_seen': user.last_seen
         } for user in participants]
-    
-    def _get_message_summary(self, obj):
-        if obj.is_deleted:
-            return "This message was deleted"
-        if obj.message_type == 'text':
-            return obj.text[:100] + '...' if obj.text and len(obj.text) > 100 else obj.text
-        elif obj.message_type == 'image':
-            return "📷 Image"
-        elif obj.message_type == 'video':
-            return "🎥 Video"
-        elif obj.message_type == 'audio':
-            return "🎵 Audio"
-        elif obj.message_type == 'location':
-            return "📍 Location"
-        else:
-            return "📎 File"
 
 
 class ChatSerializer(serializers.ModelSerializer):
@@ -631,7 +562,6 @@ class ChatSerializer(serializers.ModelSerializer):
         chat_type = data.get('chat_type', getattr(self.instance, 'chat_type', None))
         participants = data.get('participants', [])
         
-        # If participants not provided, get from instance
         if not participants and self.instance:
             participants = list(self.instance.participants.all())
         
@@ -654,7 +584,6 @@ class ChatSerializer(serializers.ModelSerializer):
                     {"name": "Group chats must have a name."}
                 )
         
-        # Check if participants exist and are active
         for participant in participants:
             if not participant.is_active:
                 raise serializers.ValidationError(
@@ -667,11 +596,9 @@ class ChatSerializer(serializers.ModelSerializer):
         participants = validated_data.pop('participants', [])
         chat = Chat.objects.create(**validated_data)
         
-        # Add participants
         if participants:
             chat.participants.set(participants)
         
-        # Set creator as admin for group chats
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             chat.participants.add(request.user)
@@ -682,7 +609,6 @@ class ChatSerializer(serializers.ModelSerializer):
         return chat
     
     def update(self, instance, validated_data):
-        # Handle participants update carefully
         participants = validated_data.pop('participants', None)
         
         for attr, value in validated_data.items():
@@ -700,14 +626,14 @@ class ChatSerializer(serializers.ModelSerializer):
         return [{
             'id': user.id,
             'username': user.username,
-            'display_name': user.get_display_name() if hasattr(user, 'get_display_name') else user.username,
+            'display_name': user.get_display_name(),
             'profile_image': user.profile_image.url if user.profile_image else None,
             'is_online': user.is_online,
             'last_seen': user.last_seen
         } for user in participants]
     
     def get_last_message(self, obj):
-        last_msg = obj.messages.filter(is_deleted=False).order_by('-created_at').first()
+        last_msg = obj.messages.filter(is_deleted=False).first()
         if last_msg:
             return MessageSummarySerializer(last_msg, context=self.context).data
         return None
@@ -717,6 +643,7 @@ class ChatSerializer(serializers.ModelSerializer):
             return {
                 'id': obj.admin.id,
                 'username': obj.admin.username,
+                'display_name': obj.admin.get_display_name(),
                 'profile_image': obj.admin.profile_image.url if obj.admin.profile_image else None
             }
         return None
@@ -770,14 +697,14 @@ class CallParticipantSerializer(serializers.ModelSerializer):
         return {
             'id': obj.user.id,
             'username': obj.user.username,
-            'display_name': obj.user.get_display_name() if hasattr(obj.user, 'get_display_name') else obj.user.username,
+            'display_name': obj.user.get_display_name(),
             'profile_image': obj.user.profile_image.url if obj.user.profile_image else None,
             'is_online': obj.user.is_online,
             'last_seen': obj.user.last_seen
         }
     
     def get_duration(self, obj):
-        return obj.duration if hasattr(obj, 'duration') else None
+        return obj.duration
     
     def validate(self, data):
         user = data.get('user')
@@ -791,7 +718,6 @@ class CallParticipantSerializer(serializers.ModelSerializer):
         return data
     
     def create(self, validated_data):
-        # Check if participant already exists
         participant, created = CallParticipant.objects.get_or_create(
             call=validated_data['call'],
             user=validated_data['user'],
@@ -803,7 +729,6 @@ class CallParticipantSerializer(serializers.ModelSerializer):
         )
         
         if not created:
-            # Update existing participant
             participant.left_at = None
             participant.is_muted = validated_data.get('is_muted', participant.is_muted)
             participant.is_video_enabled = validated_data.get('is_video_enabled', participant.is_video_enabled)
@@ -833,12 +758,12 @@ class CallQualitySerializer(serializers.ModelSerializer):
         }
     
     def validate_latency_ms(self, value):
-        if value < 0 or value > 10000:  # Max 10 seconds
+        if value < 0 or value > 10000:
             raise serializers.ValidationError("Latency must be between 0 and 10000 ms.")
         return value
     
     def validate_jitter_ms(self, value):
-        if value < 0 or value > 1000:  # Max 1 second
+        if value < 0 or value > 1000:
             raise serializers.ValidationError("Jitter must be between 0 and 1000 ms.")
         return value
     
@@ -848,7 +773,7 @@ class CallQualitySerializer(serializers.ModelSerializer):
         return value
     
     def validate_bitrate_kbps(self, value):
-        if value is not None and (value < 0 or value > 10000):  # Max 10 Mbps
+        if value is not None and (value < 0 or value > 10000):
             raise serializers.ValidationError("Bitrate must be between 0 and 10000 kbps.")
         return value
     
@@ -859,6 +784,8 @@ class CallQualitySerializer(serializers.ModelSerializer):
 
 
 # ========== CALL SERIALIZER ==========
+from django.db import transaction
+
 class CallSerializer(serializers.ModelSerializer):
     participants = CallParticipantSerializer(many=True, read_only=True)
     quality_logs = CallQualitySerializer(many=True, read_only=True)
@@ -892,7 +819,7 @@ class CallSerializer(serializers.ModelSerializer):
             return {
                 'id': obj.initiated_by.id,
                 'username': obj.initiated_by.username,
-                'display_name': obj.initiated_by.get_display_name() if hasattr(obj.initiated_by, 'get_display_name') else obj.initiated_by.username,
+                'display_name': obj.initiated_by.get_display_name(),
                 'profile_image': obj.initiated_by.profile_image.url if obj.initiated_by.profile_image else None
             }
         return None
@@ -908,10 +835,10 @@ class CallSerializer(serializers.ModelSerializer):
         return obj.call_duration
     
     def get_participant_count(self, obj):
-        return obj.participants.count()
+        return obj.participant_count
     
     def get_active_participant_count(self, obj):
-        return obj.participants.filter(left_at__isnull=True).count()
+        return obj.active_participant_count
     
     def validate(self, data):
         chat = data.get('chat')
@@ -921,24 +848,25 @@ class CallSerializer(serializers.ModelSerializer):
                 {"chat": "Private chat must have exactly 2 participants for a call."}
             )
         
-        # Check if there's already an ongoing call in this chat
-        if chat and Call.objects.filter(chat=chat, status='ongoing').exists():
+        return data
+    
+    @transaction.atomic
+    def create(self, validated_data):
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated and 'initiated_by' not in validated_data:
+            validated_data['initiated_by'] = request.user
+        
+        chat = validated_data['chat']
+        
+        # Check for ongoing call with row lock to prevent race condition
+        if Call.objects.filter(chat=chat, status='ongoing').select_for_update().exists():
             raise serializers.ValidationError(
                 {"chat": "There is already an ongoing call in this chat."}
             )
         
-        return data
-    
-    def create(self, validated_data):
-        request = self.context.get('request')
-        
-        # Set initiated_by from request
-        if request and request.user.is_authenticated and 'initiated_by' not in validated_data:
-            validated_data['initiated_by'] = request.user
-        
         call = Call.objects.create(**validated_data)
         
-        # Add initiator as first participant
         CallParticipant.objects.create(
             call=call,
             user=validated_data['initiated_by'],
@@ -978,12 +906,7 @@ class CallUpdateSerializer(serializers.ModelSerializer):
         new_status = validated_data.get('status')
         
         if new_status == 'completed' and not instance.ended_at:
-            if hasattr(instance, 'end_call'):
-                instance.end_call('completed')
-            else:
-                instance.status = new_status
-                instance.ended_at = timezone.now()
-                instance.save()
+            instance.end_call('completed')
         else:
             instance.status = new_status
             instance.save()

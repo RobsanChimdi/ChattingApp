@@ -9,6 +9,7 @@ from django.db.models import Count, Q, Avg
 from django.db.models.functions import Trunc
 from django.utils.crypto import get_random_string
 
+
 class User(AbstractUser):
     profile_image = models.ImageField(upload_to="profiles/", blank=True, null=True)
     bio = models.TextField(blank=True, null=True, max_length=500)
@@ -33,6 +34,16 @@ class User(AbstractUser):
     # WebSocket token
     websocket_token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     websocket_token_expiry = models.DateTimeField(blank=True, null=True)
+
+    def get_display_name(self):
+        """Get display name for user"""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            return self.first_name
+        elif self.last_name:
+            return self.last_name
+        return self.username
 
     def generate_verification_code(self):
         self.verification_code = get_random_string(6, allowed_chars='0123456789')
@@ -81,7 +92,8 @@ class User(AbstractUser):
     def set_offline(self):
         """Mark user as offline"""
         self.is_online = False
-        self.save(update_fields=['is_online'])
+        self.last_seen = timezone.now()
+        self.save(update_fields=['is_online', 'last_seen'])
 
 
 class Chat(models.Model):
@@ -94,7 +106,7 @@ class Chat(models.Model):
     name = models.CharField(max_length=255, blank=True, null=True)
     participants = models.ManyToManyField(User, related_name="chats")
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)  # Track last activity
+    updated_at = models.DateTimeField(auto_now=True)
     admin = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="managed_chats")
     is_active = models.BooleanField(default=True)
     
@@ -112,7 +124,6 @@ class Chat(models.Model):
     def __str__(self):
         if self.chat_type == "group":
             return self.name or f"Group Chat {self.id}"
-        # For private chats, show participants
         participants = self.participants.all()[:2]
         if len(participants) == 2:
             return f"{participants[0].username} & {participants[1].username}"
@@ -121,13 +132,17 @@ class Chat(models.Model):
     def clean(self):
         """Validate chat constraints"""
         if self.chat_type == "private":
-            if self.participants.count() != 2:
+            if self.pk and self.participants.count() != 2:
                 raise ValidationError("Private chats must have exactly 2 participants")
             if self.name:
                 raise ValidationError("Private chats should not have a name")
         elif self.chat_type == "group":
             if not self.name:
                 raise ValidationError("Group chats must have a name")
+    
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
     
     def add_participant(self, user):
         """Add a participant to chat"""
@@ -143,14 +158,18 @@ class Chat(models.Model):
     
     def last_message(self):
         """Get the last message in chat"""
-        return self.messages.filter(is_deleted=False).last()
+        return self.messages.filter(is_deleted=False).first()
     
     def unread_count(self, user):
         """Get unread message count for a specific user"""
+        # Count messages where user hasn't marked as read
         return self.messages.filter(
-            ~Q(sender=user) &  # Not sent by the user
-            Q(statuses__user=user, statuses__status__in=['sent', 'delivered'])
-        ).count()
+            ~Q(sender=user),
+            is_deleted=False
+        ).exclude(
+            statuses__user=user,
+            statuses__status='read'
+        ).distinct().count()
 
 
 class Message(models.Model):
@@ -189,12 +208,12 @@ class Message(models.Model):
     client_message_id = models.CharField(max_length=100, blank=True, null=True, unique=True)
     
     class Meta:
-        ordering = ["-created_at"]  # Changed to descending for frontend
+        ordering = ["-created_at"]
         verbose_name = "Message"
         verbose_name_plural = "Messages"
         indexes = [
-            models.Index(fields=['chat', '-created_at']),  # Changed to descending
-            models.Index(fields=['sender', '-created_at']),  # Changed to descending
+            models.Index(fields=['chat', '-created_at']),
+            models.Index(fields=['sender', '-created_at']),
             models.Index(fields=['is_deleted']),
             models.Index(fields=['client_message_id']),
         ]
@@ -207,17 +226,18 @@ class Message(models.Model):
         if self.reply_to and self.reply_to.chat != self.chat:
             raise ValidationError("Reply must be to a message in the same chat")
         
-        # Validate location data for location messages
         if self.message_type == "location":
             if not (self.latitude and self.longitude):
                 raise ValidationError("Location messages require latitude and longitude")
+        
+        if self.message_type == "text" and not self.text.strip():
+            raise ValidationError("Text message cannot be empty")
     
     def save(self, *args, **kwargs):
-        self.full_clean()  # Run validation before saving
+        self.full_clean()
         if self.is_deleted and not self.deleted_at:
             self.deleted_at = timezone.now()
         
-        # Update chat's updated_at when new message is created
         if not self.pk:  # New message
             super().save(*args, **kwargs)
             self.chat.updated_at = self.created_at
@@ -244,7 +264,6 @@ class Message(models.Model):
     
     def hard_delete(self):
         """Permanently delete message"""
-        # Delete associated media files
         for media in self.media.all():
             if media.file and os.path.isfile(media.file.path):
                 os.remove(media.file.path)
@@ -309,11 +328,11 @@ class MessageMedia(models.Model):
     file = models.FileField(upload_to="message_media/%Y/%m/%d/")
     thumbnail = models.ImageField(upload_to="message_media/thumbnails/%Y/%m/%d/", blank=True, null=True)
     file_name = models.CharField(max_length=255, blank=True, null=True)
-    file_size = models.BigIntegerField(blank=True, null=True)  # in bytes
+    file_size = models.BigIntegerField(blank=True, null=True)
     mime_type = models.CharField(max_length=100, blank=True, null=True)
-    duration = models.FloatField(blank=True, null=True)  # for audio/video in seconds
-    width = models.IntegerField(blank=True, null=True)  # for images/videos
-    height = models.IntegerField(blank=True, null=True)  # for images/videos
+    duration = models.FloatField(blank=True, null=True)
+    width = models.IntegerField(blank=True, null=True)
+    height = models.IntegerField(blank=True, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -324,19 +343,6 @@ class MessageMedia(models.Model):
     
     def __str__(self):
         return f"Media for Message {self.message.id}"
-    
-    def save(self, *args, **kwargs):
-        """Populate file metadata before saving"""
-        if not self.file_name and self.file:
-            self.file_name = os.path.basename(self.file.name)
-        
-        if not self.file_size and self.file:
-            try:
-                self.file_size = self.file.size
-            except (OSError, FileNotFoundError):
-                pass
-        
-        super().save(*args, **kwargs)
     
     def clean(self):
         """Validate media file"""
@@ -351,6 +357,21 @@ class MessageMedia(models.Model):
             
             elif self.message.message_type == "audio" and file_extension not in self.VALID_AUDIO_EXTENSIONS:
                 raise ValidationError(f"Invalid audio format. Allowed: {', '.join(self.VALID_AUDIO_EXTENSIONS)}")
+    
+    def save(self, *args, **kwargs):
+        """Populate file metadata before saving"""
+        self.full_clean()
+        
+        if not self.file_name and self.file:
+            self.file_name = os.path.basename(self.file.name)
+        
+        if not self.file_size and self.file:
+            try:
+                self.file_size = self.file.size
+            except (OSError, FileNotFoundError):
+                pass
+        
+        super().save(*args, **kwargs)
     
     @property
     def filename(self):
@@ -485,7 +506,7 @@ class Call(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(blank=True, null=True)
     initiated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="initiated_calls")
-    call_duration = models.IntegerField(blank=True, null=True)  # in seconds
+    call_duration = models.IntegerField(blank=True, null=True)
     is_group_call = models.BooleanField(default=False)
     
     class Meta:
@@ -552,13 +573,13 @@ class CallParticipant(models.Model):
     left_at = models.DateTimeField(blank=True, null=True)
     is_muted = models.BooleanField(default=False)
     is_video_enabled = models.BooleanField(default=True)
-    is_speaking = models.BooleanField(default=False)  # New field for real-time speaking status
+    is_speaking = models.BooleanField(default=False)
     role = models.CharField(
         max_length=20,
         choices=ROLES,
         default="participant"
     )
-    has_video = models.BooleanField(default=False)  # New field to match frontend
+    has_video = models.BooleanField(default=False)
     
     class Meta:
         unique_together = ("call", "user")
@@ -608,13 +629,13 @@ class CallQuality(models.Model):
     
     call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="quality_logs")
     participant = models.ForeignKey(CallParticipant, on_delete=models.CASCADE, null=True, blank=True)
-    latency_ms = models.IntegerField()  # round_trip_time in frontend
-    jitter_ms = models.IntegerField()  # jitter in frontend
-    packet_loss = models.FloatField()  # packet_loss in frontend
+    latency_ms = models.IntegerField()
+    jitter_ms = models.IntegerField()
+    packet_loss = models.FloatField()
     bitrate_kbps = models.IntegerField(null=True, blank=True)
-    audio_bitrate = models.IntegerField(null=True, blank=True)  # New field
-    video_bitrate = models.IntegerField(null=True, blank=True)  # New field
-    audio_level = models.FloatField(null=True, blank=True)  # New field
+    audio_bitrate = models.IntegerField(null=True, blank=True)
+    video_bitrate = models.IntegerField(null=True, blank=True)
+    audio_level = models.FloatField(null=True, blank=True)
     quality_status = models.CharField(max_length=20, choices=QUALITY_STATUS, blank=True, null=True)
     measured_at = models.DateTimeField(auto_now_add=True)
     
@@ -689,14 +710,12 @@ class CallQuality(models.Model):
         if not logs.exists():
             return None
         
-        # Count by quality status
         status_counts = logs.values('quality_status').annotate(count=Count('id'))
         
-        # Get quality trends
         trends = logs.order_by('measured_at').values(
             'measured_at', 'latency_ms', 'jitter_ms', 'packet_loss', 
             'audio_bitrate', 'video_bitrate', 'audio_level', 'quality_status'
-        )[:50]  # Limit to recent 50 logs
+        )[:50]
         
         avg_metrics = cls.average_quality(call_id)
         
