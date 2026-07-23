@@ -30,7 +30,9 @@ export function IncomingCallModal({ open, onOpenChange }: IncomingCallModalProps
 
   if (!incomingCall) return null;
 
-  const callerName = incomingCall.initiated_by.username || 'Unknown';
+  const callerProfile = incomingCall.initiated_by_info;
+  const callerName = callerProfile?.display_name || callerProfile?.username || `User #${incomingCall.initiated_by}` || 'Unknown';
+  const callerAvatar = callerProfile?.profile_image || '';
   const callType = incomingCall.call_type;
   const isVideoCall = callType === 'video';
 
@@ -60,7 +62,7 @@ export function IncomingCallModal({ open, onOpenChange }: IncomingCallModalProps
           {/* Caller info */}
           <div className="text-center">
             <Avatar className="h-24 w-24 mx-auto mb-4">
-              <AvatarImage src={incomingCall.initiated_by.profile_image || ''} />
+              <AvatarImage src={callerAvatar} />
               <AvatarFallback>
                 {callerName.charAt(0).toUpperCase()}
               </AvatarFallback>

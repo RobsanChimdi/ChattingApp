@@ -168,7 +168,7 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
     const currentChat = useChatStore.getState().currentChat;
     if (!user || message.is_deleted) return false;
     if (message.sender === user.id) return true;
-    if (currentChat?.chat_type === 'group' && currentChat.admin?.id === user.id) return true;
+    if (currentChat?.chat_type === 'group' && currentChat.participants_info?.some((participant) => participant.id === user.id && participant.username === user.username)) return true;
     return false;
   }, [user]);
 

@@ -17,10 +17,10 @@ import {
 import { useChat } from '@/hooks/useChat';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
-import type { Chat } from '@/types';
+import type { ChatListItem } from '@/types';
 
 interface ChatListProps {
-  onChatSelect: (chat: Chat) => void;
+  onChatSelect: (chat: ChatListItem) => void;
   selectedChatId?: string;
 }
 
@@ -28,7 +28,8 @@ export function ChatList({ onChatSelect, selectedChatId }: ChatListProps) {
   const { chats, fetchChats, searchChats, isLoading } = useChat();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredChats, setFilteredChats] = useState<Chat[]>([]);
+  const [filteredChats, setFilteredChats] = useState<ChatListItem[]>([]);
+  const selectedChatIdNumber = selectedChatId ? Number(selectedChatId) : undefined;
 
   useEffect(() => {
     fetchChats();
@@ -42,35 +43,35 @@ export function ChatList({ onChatSelect, selectedChatId }: ChatListProps) {
     }
   }, [chats, searchQuery, searchChats]);
 
-  const getChatName = useCallback((chat: Chat) => {
+  const getChatName = useCallback((chat: ChatListItem) => {
     if (chat.chat_type === 'private') {
-      const otherUser = chat.participants.find(p => p.id !== user?.id);
-      return otherUser?.username || 'Unknown User';
+      const otherUser = chat.participants_info?.find(p => p.id !== user?.id);
+      return otherUser?.display_name || otherUser?.username || 'Unknown User';
     }
-    return chat.name || 'Group Chat';
+    return chat.name || chat.display_name || 'Group Chat';
   }, [user]);
 
-  const getChatAvatar = useCallback((chat: Chat) => {
+  const getChatAvatar = useCallback((chat: ChatListItem) => {
     if (chat.chat_type === 'private') {
-      const otherUser = chat.participants.find(p => p.id !== user?.id);
+      const otherUser = chat.participants_info?.find(p => p.id !== user?.id);
       return otherUser?.profile_image || undefined;
     }
-    return chat.avatar || undefined;
+    return chat.avatar || chat.display_image || chat.image || undefined;
   }, [user]);
 
-  const getLastMessagePreview = useCallback((chat: Chat) => {
+  const getLastMessagePreview = useCallback((chat: ChatListItem) => {
     if (!chat.last_message) return 'No messages yet';
-    
-    const sender = chat.last_message.sender.id === user?.id ? 'You: ' : '';
-    const text = chat.last_message.text || 
-      (chat.last_message.message_type === 'image' ? '📷 Photo' : 
-       chat.last_message.message_type === 'video' ? '🎥 Video' : 
+
+    const sender = String(chat.last_message.sender) === String(user?.id) ? 'You: ' : '';
+    const text = chat.last_message.summary ||
+      (chat.last_message.message_type === 'image' ? '📷 Photo' :
+       chat.last_message.message_type === 'video' ? '🎥 Video' :
        chat.last_message.message_type === 'file' ? '📄 File' : '');
-    
+
     return sender + text;
   }, [user]);
 
-  const getUnreadCount = useCallback((chat: Chat) => {
+  const getUnreadCount = useCallback((chat: ChatListItem) => {
     return chat.unread_count || 0;
   }, []);
 
@@ -149,15 +150,13 @@ export function ChatList({ onChatSelect, selectedChatId }: ChatListProps) {
           </div>
         ) : (
           filteredChats.map((chat) => {
-              const isRead = chat.last_message?.statuses?.some(
-                (s) => s.status === 'read'
-              );
+              const isRead = chat.unread_count === 0;
               return (
                     <Card
                       key={chat.id}
                       className={cn(
                         "border-0 border-b rounded-none cursor-pointer transition-colors hover:bg-muted/50",
-                        selectedChatId === chat.id && "bg-muted"
+                        selectedChatIdNumber === chat.id && "bg-muted"
                       )}
                       onClick={() => onChatSelect(chat)}
                     >
@@ -205,18 +204,17 @@ export function ChatList({ onChatSelect, selectedChatId }: ChatListProps) {
 
                             {/* Status indicators */}
                             <div className="flex items-center space-x-2 mt-1">
-                              {chat.last_message?.sender.id === user?.id && (
-                                
-                                    <span className="text-xs text-muted-foreground">
-                                      {isRead ? (
-                                        <CheckCheck className="h-3 w-3 inline" />
-                                      ) : (
-                                        <Check className="h-3 w-3 inline" />
-                                      )}
-                                    </span>
+                              {String(chat.last_message?.sender) === String(user?.id) && (
+                                <span className="text-xs text-muted-foreground">
+                                  {isRead ? (
+                                    <CheckCheck className="h-3 w-3 inline" />
+                                  ) : (
+                                    <Check className="h-3 w-3 inline" />
                                   )}
+                                </span>
+                              )}
 
-                              {chat.participants?.some(u => u.id !== user?.id) && (
+                              {chat.participants_info?.some(u => u.id !== user?.id) && (
                                 <span className="text-xs text-primary animate-pulse">
                                   typing...
                                 </span>

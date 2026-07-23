@@ -10,6 +10,7 @@ export interface Chat {
   description?: string;
   chat_type: ChatType;
   image?: string;
+  avatar?: string;
   display_image?: string;
   display_name?: string;
   admin?: User;
@@ -47,6 +48,7 @@ export interface ChatListItem {
   name?: string;
   display_name?: string;
   image?: string;
+  avatar?: string;
   display_image?: string;
   chat_type: ChatType;
   description?: string;

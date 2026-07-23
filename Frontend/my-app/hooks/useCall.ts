@@ -5,7 +5,7 @@ import { useCallStore } from '@/store/callStore'; // FIXED import
 import { useAuth } from './useAuth';
 import { useSocket } from './useSocket';
 import { useWebRTC } from './useWebRTC';
-import type { Call, CallParticipant, WebRTCSignal } from '@/types';
+import type { Call, CallParticipant, WebRTCSignal, CallQuality } from '@/types';
 
 interface UseCallReturn {
   // State
@@ -331,10 +331,27 @@ export const useCall = (callId?: number): UseCallReturn => {
       if (!activeCall) return;
       try {
         const connections = webRTC.getActiveConnections();
-        const stats = { audioLevel: 0, videoBitrate: 0, audioBitrate: 0, packetLoss: 0, jitter: 0, roundTripTime: 0 };
+        const stats = {
+          audioLevel: 0,
+          videoBitrate: 0,
+          audioBitrate: 0,
+          packetLoss: 0,
+          jitter: 0,
+          roundTripTime: 0,
+        };
+        const qualityPayload: Partial<CallQuality> = {
+          latency_ms: stats.roundTripTime,
+          jitter_ms: stats.jitter,
+          packet_loss: stats.packetLoss,
+          audio_bitrate: stats.audioBitrate,
+          video_bitrate: stats.videoBitrate,
+          audio_level: stats.audioLevel,
+          quality_status: stats.packetLoss > 0.1 || stats.jitter > 50 ? 'poor' : 'good',
+        };
+
         setCallStats(stats);
         if (stats.packetLoss > 0.1 || stats.jitter > 50) {
-          useCallStore.getState().logCallQuality(activeCall.id, stats);
+          useCallStore.getState().logCallQuality(activeCall.id, qualityPayload);
         }
       } catch (error) {
         console.error('Failed to get connection stats:', error);

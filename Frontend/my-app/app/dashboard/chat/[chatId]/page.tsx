@@ -11,6 +11,7 @@ import { ChatList } from '@/components/chat/chat-list';
 import { Button } from '@/components/ui/button';
 import { Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { ChatListItem } from '@/types';
 
 export default function ChatPage() {
   const params = useParams();
@@ -37,7 +38,7 @@ export default function ChatPage() {
     }
   }, [isAuthenticated, fetchChats, isInitialized]);
 
-  const handleChatSelect = (chat: any) => {
+  const handleChatSelect = (chat: ChatListItem) => {
     setCurrentChat(chat);
     router.push(`/chat/${chat.id}`);
     setIsMobileMenuOpen(false);

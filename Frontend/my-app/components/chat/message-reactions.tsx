@@ -57,7 +57,7 @@ export function MessageReactions({
 
   const userReaction = useMemo(() => {
     if (!message.reactions || !user) return null;
-    return message.reactions.find(reaction => reaction.user.id === user.id);
+    return message.reactions.find((reaction) => reaction.user === user.id);
   }, [message.reactions, user]);
 
   const groupedReactions = useMemo(() => {
@@ -72,15 +72,20 @@ export function MessageReactions({
         };
       }
       acc[reaction.emoji].count++;
-      acc[reaction.emoji].users.push(reaction.user);
+      acc[reaction.emoji].users.push({
+        id: reaction.user,
+        username: reaction.user_info?.username || 'Unknown User',
+        display_name: reaction.user_info?.display_name || 'Unknown User',
+        profile_image: reaction.user_info?.profile_image,
+      });
       return acc;
-    }, {} as Record<string, { emoji: string; count: number; users: any[] }>);
+    }, {} as Record<string, { emoji: string; count: number; users: Array<{ id: number; username: string; display_name: string; profile_image?: string }> }>);
   }, [message.reactions]);
 
   const handleReactionClick = useCallback(async (emoji: string) => {
     if (userReaction?.emoji === emoji) {
       // Remove reaction if same emoji
-      await removeReaction();
+      await removeReaction(emoji);
       onReactionRemove?.();
     } else {
       // Add or change reaction

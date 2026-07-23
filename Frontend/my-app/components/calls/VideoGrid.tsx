@@ -11,7 +11,7 @@ import type { CallParticipant } from '@/types';
 interface VideoGridProps {
   participants: CallParticipant[];
   localStream: MediaStream | null;
-  remoteStreams: Map<string, MediaStream>;
+  remoteStreams: Map<number, MediaStream>;
   isMuted: boolean;
   hasVideo: boolean;
   onToggleMute: () => void;
@@ -28,7 +28,7 @@ export function VideoGrid({
   onToggleVideo
 }: VideoGridProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const remoteVideoRefs = useRef<Map<number, HTMLVideoElement>>(new Map());
 
   // Set local video stream
   useEffect(() => {
@@ -82,7 +82,7 @@ export function VideoGrid({
     },
     ...participants.map(p => ({
       ...p,
-      stream: remoteStreams.get(p.user.id.toString())
+      stream: remoteStreams.get(p.user.id)
     }))
   ].filter(p => p.user.id !== 'local' || hasVideo);
 
@@ -118,8 +118,8 @@ export function VideoGrid({
                   ref={el => {
                     if (isLocal && el) {
                       localVideoRef.current = el;
-                    } else if (!isLocal && el) {
-                      remoteVideoRefs.current.set(participant.user.id.toString(), el);
+                    } else if (!isLocal && el && typeof participant.user.id === 'number') {
+                      remoteVideoRefs.current.set(participant.user.id, el);
                     }
                   }}
                   autoPlay

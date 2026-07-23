@@ -42,6 +42,33 @@ from .serializers import (
 # Set up logging
 logger = logging.getLogger(__name__)
 
+
+def clear_cache_by_prefix(prefix):
+    """Safely clear cache keys for backends that do not expose delete_pattern()."""
+    try:
+        if hasattr(cache, 'delete_pattern'):
+            cache.delete_pattern(prefix)
+            return
+    except Exception:
+        logger.warning("delete_pattern() is unavailable or failed for cache backend", exc_info=True)
+
+    try:
+        backend = cache
+        local_cache = getattr(backend, '_cache', None)
+        if local_cache is not None:
+            for key in list(local_cache.keys()):
+                if key.startswith(prefix):
+                    backend.delete(key)
+            return
+    except Exception:
+        logger.warning("Fallback cache key cleanup failed", exc_info=True)
+
+    try:
+        cache.clear()
+    except Exception:
+        logger.warning("cache.clear() failed during fallback cleanup", exc_info=True)
+
+
 # Try to import psutil for disk health checks
 try:
     import psutil
@@ -460,7 +487,7 @@ class UpdateLastSeenView(APIView):
     def post(self, request):
         request.user.update_last_seen()
         # Clear status cache
-        cache.delete_pattern(f'user_status_{request.user.id}_*')
+        clear_cache_by_prefix(f'user_status_{request.user.id}_')
         return Response({'status': 'last_seen_updated'})
 
 
@@ -470,7 +497,7 @@ class SetOfflineView(APIView):
     def post(self, request):
         request.user.set_offline()
         # Clear status cache
-        cache.delete_pattern(f'user_status_{request.user.id}_*')
+        clear_cache_by_prefix(f'user_status_{request.user.id}_')
         cache.delete(f'user_data_{request.user.id}')
         return Response({'status': 'offline'})
 

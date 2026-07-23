@@ -39,10 +39,10 @@ import { useChat } from '@/hooks/useChat';
 import { useCall } from '@/hooks/useCall';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
-import type { Chat } from '@/types';
+import type { ChatListItem } from '@/types';
 
 interface ChatHeaderProps {
-  chat: Chat;
+  chat: ChatListItem;
   onBack?: () => void;
 }
 
@@ -53,29 +53,30 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
   const [isLeaveDialogOpen, setIsLeaveDialogOpen] = useState(false);
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const participants = chat.participants_info ?? [];
 
   const getChatName = () => {
     if (chat.chat_type === 'private') {
-      const otherUser = chat.participants.find(p => p.id !== user?.id);
-      return otherUser?.username || 'Unknown User';
+      const otherUser = participants.find((p) => p.id !== user?.id);
+      return otherUser?.username || otherUser?.display_name || 'Unknown User';
     }
-    return chat.name || 'Group Chat';
+    return chat.name || chat.display_name || 'Group Chat';
   };
 
   const getChatAvatar = () => {
     if (chat.chat_type === 'private') {
-      const otherUser = chat.participants.find(p => p.id !== user?.id);
-      return otherUser?.profile_image|| undefined;
+      const otherUser = participants.find((p) => p.id !== user?.id);
+      return otherUser?.profile_image || chat.avatar || undefined;
     }
     return chat.avatar || undefined;
   };
 
   const getStatusText = () => {
     if (chat.chat_type === 'private') {
-      const otherUser = chat.participants.find(p => p.id !== user?.id);
+      const otherUser = participants.find((p) => p.id !== user?.id);
       return otherUser?.is_online ? 'Online' : 'Offline';
     }
-    return `${chat.participants.length} members`;
+    return `${participants.length} members`;
   };
 
   const handleAudioCall = async () => {
