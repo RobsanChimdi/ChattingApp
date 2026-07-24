@@ -3,6 +3,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User } from '@/types/user.types';
 import { authService } from '@/services/auth.service';
+import { api } from '@/services/api';
+import { extractErrorMessage } from '@/utils/errorHandler';
 
 interface AuthState {
   user: User | null;
@@ -12,6 +14,7 @@ interface AuthState {
   error: string | null;
   isEmailVerified: boolean;
   verificationEmailSent: boolean;
+  pendingVerificationEmail: string | null;
 }
 
 interface AuthActions {
@@ -72,6 +75,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       error: null,
       isEmailVerified: false,
       verificationEmailSent: false,
+      pendingVerificationEmail: null,
       
       // Authentication actions
       login: async (credentials) => {
@@ -79,18 +83,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         
         try {
           const response = await authService.login(credentials);
-          
-          // Check if email is verified
-          if (response.user && !response.user.is_verified) {
-            set({ 
-              error: 'Please verify your email before logging in',
-              isLoading: false,
-              user: response.user,
-              token: response.token,
-              isAuthenticated: false,
-            });
-            return;
-          }
+          api.setToken(response.token);
           
           set({
             user: response.user,
@@ -99,10 +92,11 @@ export const useAuthStore = create<AuthState & AuthActions>()(
             isEmailVerified: response.user?.is_verified || false,
             isLoading: false,
             error: null,
+            pendingVerificationEmail: null,
           });
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || error.response?.data?.message || 'Login failed',
+            error: extractErrorMessage(error),
             isLoading: false,
             isAuthenticated: false,
           });
@@ -114,19 +108,18 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         set({ isLoading: true, error: null, verificationEmailSent: false });
         
         try {
-          await authService.register(data);
+          const response = await authService.register(data);
           
           set({
             verificationEmailSent: true,
+            pendingVerificationEmail: response.email || data.email,
             isLoading: false,
           });
           
           // Note: User is not authenticated until email is verified
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || 
-                  error.response?.data?.message || 
-                  'Registration failed',
+            error: extractErrorMessage(error),
             isLoading: false,
             isAuthenticated: false,
           });
@@ -155,12 +148,14 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           const response = await authService.verifyEmail(data);
           
           if (response.status === 'verified' && response.user && response.token) {
+            api.setToken(response.token);
             set({ 
               user: response.user,
               token: response.token,
               isAuthenticated: true,
               isEmailVerified: true,
               isLoading: false,
+              pendingVerificationEmail: null,
             });
             return true;
           }
@@ -168,7 +163,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           return false;
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || 'Verification failed',
+            error: extractErrorMessage(error),
             isLoading: false,
           });
           throw error;
@@ -183,7 +178,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           set({ verificationEmailSent: true, isLoading: false });
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || 'Failed to resend code',
+            error: extractErrorMessage(error),
             isLoading: false,
           });
           throw error;
@@ -199,7 +194,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           set({ isLoading: false });
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || 'Failed to request password reset',
+            error: extractErrorMessage(error),
             isLoading: false,
           });
           throw error;
@@ -214,7 +209,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           set({ isLoading: false });
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || 'Failed to reset password',
+            error: extractErrorMessage(error),
             isLoading: false,
           });
           throw error;
@@ -235,6 +230,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       },
       
       clearAuth: () => {
+        api.removeToken();
         set({
           user: null,
           token: null,
@@ -242,6 +238,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           error: null,
           isEmailVerified: false,
           verificationEmailSent: false,
+          pendingVerificationEmail: null,
         });
       },
       
@@ -259,7 +256,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           return updatedUser;
         } catch (error: any) {
           set({
-            error: error.response?.data?.error || 'Profile update failed',
+            error: extractErrorMessage(error),
             isLoading: false,
           });
           throw error;
@@ -277,8 +274,9 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       setOffline: async () => {
         try {
           await authService.setOffline();
-          if (get().isAuthenticated) {
-            set({ user: { ...get().user!, is_online: false }, isAuthenticated: false });
+          const currentUser = get().user;
+          if (currentUser) {
+            set({ user: { ...currentUser, is_online: false } });
           }
         } catch (error) {
           console.error('Failed to set offline:', error);
@@ -301,6 +299,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       setError: (error) => set({ error }),
       clearError: () => set({ error: null }),
       resetState: () => {
+        api.removeToken();
         set({
           user: null,
           token: null,
@@ -309,6 +308,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           error: null,
           isEmailVerified: false,
           verificationEmailSent: false,
+          pendingVerificationEmail: null,
         });
       },
     }),
@@ -319,7 +319,13 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         token: state.token,
         isAuthenticated: state.isAuthenticated,
         isEmailVerified: state.isEmailVerified,
+        pendingVerificationEmail: state.pendingVerificationEmail,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.token) {
+          api.setToken(state.token);
+        }
+      },
     }
   )
 );

@@ -1,6 +1,7 @@
 // services/message.service.ts
 import { api } from './api';
 import type { Message, MessageCreateData, MessageReaction } from '../types/message.types';
+import { extractErrorMessage } from '@/utils/errorHandler';
 
 export interface MarkAllReadResponse {
   count: number;
@@ -30,87 +31,139 @@ export interface PaginatedResponse<T> {
 export const messageService = {
   // Create message
   async sendMessage(data: MessageCreateData): Promise<Message> {
-    const formData = new FormData();
-    
-    // Add text data
-    if (data.text) formData.append('text', data.text);
-    if (data.chat) formData.append('chat', data.chat.toString());
-    if (data.reply_to) formData.append('reply_to', data.reply_to.toString());
-    if (data.message_type) formData.append('message_type', data.message_type);
-    
-    // Add location data
-    if (data.latitude) formData.append('latitude', data.latitude.toString());
-    if (data.longitude) formData.append('longitude', data.longitude.toString());
-    if (data.location_name) formData.append('location_name', data.location_name);
-    
-    // Add files
-    if (data.files && data.files.length > 0) {
-      data.files.forEach((file) => {
-        formData.append('files', file);
-      });
+    try {
+      const formData = new FormData();
+      
+      // Add text data
+      if (data.text) formData.append('text', data.text);
+      if (data.chat) formData.append('chat', data.chat.toString());
+      if (data.reply_to) formData.append('reply_to', data.reply_to.toString());
+      if (data.message_type) formData.append('message_type', data.message_type);
+      
+      // Add location data
+      if (data.latitude) formData.append('latitude', data.latitude.toString());
+      if (data.longitude) formData.append('longitude', data.longitude.toString());
+      if (data.location_name) formData.append('location_name', data.location_name);
+      
+      // Add files
+      if (data.files && data.files.length > 0) {
+        data.files.forEach((file) => {
+          formData.append('files', file);
+        });
+      }
+      
+      return await api.upload<Message>('/messages/create/', formData);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
     }
-    
-    return await api.upload<Message>('/messages/create/', formData);
   },
 
   // Get message
   async getMessage(messageId: number): Promise<Message> {
-    return await api.get<Message>(`/messages/${messageId}/`);
+    try {
+      return await api.get<Message>(`/messages/${messageId}/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
  async markAllAsRead(chatId: number): Promise<MarkAllReadResponse> {
-    return await api.post<MarkAllReadResponse>(`/messages/mark-all-read/`, { chat_id: chatId });
+    try {
+      return await api.post<MarkAllReadResponse>(`/messages/mark-all-read/`, { chat_id: chatId });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
   // Edit message
   async editMessage(messageId: number, text: string): Promise<Message> {
-    return await api.patch<Message>(`/messages/${messageId}/`, { text });
+    try {
+      return await api.patch<Message>(`/messages/${messageId}/`, { text });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Delete message (soft delete)
   async deleteMessage(messageId: number): Promise<void> {
-    await api.delete(`/messages/${messageId}/`);
+    try {
+      await api.delete(`/messages/${messageId}/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Reactions
   async addReaction(messageId: number, emoji: string): Promise<MessageReaction> {
-    return await api.post<MessageReaction>(`/messages/${messageId}/reactions/`, { emoji });
+    try {
+      return await api.post<MessageReaction>(`/messages/${messageId}/reactions/`, { emoji });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   async removeReaction(messageId: number, emoji: string): Promise<void> {
-    await api.delete(`/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/`);
+    try {
+      await api.delete(`/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Forward message
   async forwardMessage(messageId: number, targetChatId: number): Promise<Message> {
-    return await api.post<Message>(`/messages/${messageId}/forward/`, { target_chat_id: targetChatId });
+    try {
+      return await api.post<Message>(`/messages/${messageId}/forward/`, { target_chat_id: targetChatId });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Mark as read
   async markMessageAsRead(messageId: number): Promise<void> {
-    // Note: Messages are auto-marked as read when fetched
-    // This is a manual endpoint if needed
-    await api.post(`/messages/${messageId}/mark-read/`);
+    try {
+      // Note: Messages are auto-marked as read when fetched
+      // This is a manual endpoint if needed
+      await api.post(`/messages/${messageId}/mark-read/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Media operations
   async uploadMedia(chatId: number, file: File): Promise<MediaInfo> {
-    const formData = new FormData();
-    formData.append('chat_id', chatId.toString());
-    formData.append('file', file);
-    
-    return await api.upload<MediaInfo>('/media/upload/', formData);
+    try {
+      const formData = new FormData();
+      formData.append('chat_id', chatId.toString());
+      formData.append('file', file);
+      
+      return await api.upload<MediaInfo>('/media/upload/', formData);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   async getMediaInfo(mediaId: number): Promise<MediaInfo> {
-    return await api.get<MediaInfo>(`/media/${mediaId}/info/`);
+    try {
+      return await api.get<MediaInfo>(`/media/${mediaId}/info/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   async getChatMedia(chatId: number, page = 1): Promise<PaginatedResponse<MediaInfo>> {
-    return await api.get<PaginatedResponse<MediaInfo>>(`/media/chat/${chatId}/`, {
-      params: { page }
-    });
+    try {
+      return await api.get<PaginatedResponse<MediaInfo>>(`/media/chat/${chatId}/`, {
+        params: { page }
+      });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   async getMediaDownloadUrl(mediaId: number): Promise<{ download_url: string }> {
-    return await api.get<{ download_url: string }>(`/media/${mediaId}/download/`);
+    try {
+      return await api.get<{ download_url: string }>(`/media/${mediaId}/download/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 };

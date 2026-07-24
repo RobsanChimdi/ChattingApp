@@ -2,6 +2,7 @@
 import { api } from './api';
 import type { Chat, ChatCreateData } from '@/types/chat.types';
 import type { Message } from '@/types/message.types';
+import { extractErrorMessage } from '@/utils/errorHandler';
 
 export interface PaginatedResponse<T> {
   results: T[];
@@ -13,75 +14,127 @@ export interface PaginatedResponse<T> {
 export const chatService = {
   // Chat list
   async getChats(page = 1, pageSize = 20): Promise<PaginatedResponse<Chat>> {
-    return await api.get<PaginatedResponse<Chat>>('/chats/', {
-      params: { page, page_size: pageSize }
-    });
+    try {
+      return await api.get<PaginatedResponse<Chat>>('/chats/', {
+        params: { page, page_size: pageSize }
+      });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Create chat
   async createChat(data: ChatCreateData): Promise<Chat> {
-    return await api.post<Chat>('/chats/', data);
+    try {
+      return await api.post<Chat>('/chats/', data);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Create private chat
   async createPrivateChat(participantId: number): Promise<Chat> {
-    return await api.post<Chat>('/chats/private/create/', { participant_id: participantId });
+    try {
+      return await api.post<Chat>('/chats/private/create/', { participant_id: participantId });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Chat details
   async getChat(chatId: number): Promise<Chat> {
-    return await api.get<Chat>(`/chats/${chatId}/`);
+    try {
+      return await api.get<Chat>(`/chats/${chatId}/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   async updateChat(chatId: number, data: Partial<Chat>): Promise<Chat> {
-    return await api.patch<Chat>(`/chats/${chatId}/update/`, data);
+    try {
+      return await api.patch<Chat>(`/chats/${chatId}/update/`, data);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Participants
   async addParticipant(chatId: number, userId: number): Promise<{ status: string }> {
-    return await api.post<{ status: string }>(`/chats/${chatId}/add-participant/`, { user_id: userId });
+    try {
+      return await api.post<{ status: string }>(`/chats/${chatId}/add-participant/`, { user_id: userId });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   async removeParticipant(chatId: number, userId: number): Promise<{ status: string }> {
-    return await api.post<{ status: string }>(`/chats/${chatId}/remove-participant/`, { user_id: userId });
+    try {
+      return await api.post<{ status: string }>(`/chats/${chatId}/remove-participant/`, { user_id: userId });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   async leaveChat(chatId: number): Promise<{ status: string }> {
-    return await api.post<{ status: string }>(`/chats/${chatId}/leave/`);
+    try {
+      return await api.post<{ status: string }>(`/chats/${chatId}/leave/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
    async markAllAsRead(chatId: number): Promise<{ count: number }> {
-    return await api.post<{ count: number }>(`/messages/mark-all-read/`, { chat_id: chatId });
+    try {
+      return await api.post<{ count: number }>(`/messages/mark-all-read/`, { chat_id: chatId });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Messages
   async getMessages(chatId: number, page = 1, pageSize = 50): Promise<PaginatedResponse<Message>> {
-    return await api.get<PaginatedResponse<Message>>(
-      `/chats/${chatId}/messages/`,
-      { params: { page, page_size: pageSize } }
-    );
+    try {
+      return await api.get<PaginatedResponse<Message>>(
+        `/chats/${chatId}/messages/`,
+        { params: { page, page_size: pageSize } }
+      );
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   async sendMessage(chatId: number, data: FormData | any): Promise<Message> {
-    const isFormData = data instanceof FormData;
-    const url = '/messages/create/';
-    
-    if (isFormData) {
-      return await api.upload<Message>(url, data);
-    } else {
-      return await api.post<Message>(url, { ...data, chat: chatId });
+    try {
+      const isFormData = data instanceof FormData;
+      const url = '/messages/create/';
+      
+      if (isFormData) {
+        return await api.upload<Message>(url, data);
+      } else {
+        return await api.post<Message>(url, { ...data, chat: chatId });
+      }
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
     }
   },
 
   // Unread counts
   async getUnreadCounts(): Promise<Record<string, number>> {
-    return await api.get<Record<string, number>>('/chats/unread-counts/');
+    try {
+      return await api.get<Record<string, number>>('/chats/unread-counts/');
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 
   // Search messages
   async searchMessages(query: string, chatId?: number, page = 1): Promise<PaginatedResponse<Message>> {
-    const params: any = { q: query, page };
-    if (chatId) params.chat_id = chatId;
-    
-    return await api.get<PaginatedResponse<Message>>('/messages/search/', { params });
+    try {
+      const params: any = { q: query, page };
+      if (chatId) params.chat_id = chatId;
+      
+      return await api.get<PaginatedResponse<Message>>('/messages/search/', { params });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   },
 };

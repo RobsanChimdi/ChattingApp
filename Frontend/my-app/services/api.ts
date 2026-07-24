@@ -1,6 +1,25 @@
 // services/api.ts
 import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig, AxiosError } from 'axios';
 
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  const directToken = localStorage.getItem('token');
+  if (directToken) return directToken;
+
+  try {
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      const parsed = JSON.parse(authStorage);
+      return parsed?.state?.token ?? null;
+    }
+  } catch {
+    // Ignore malformed auth storage
+  }
+
+  return null;
+}
+
 class ApiClient {
   private client: AxiosInstance;
 
@@ -13,10 +32,15 @@ class ApiClient {
       },
     });
 
+    const initialToken = getStoredToken();
+    if (initialToken) {
+      this.client.defaults.headers.common['Authorization'] = `Token ${initialToken}`;
+    }
+
     // Request interceptor
     this.client.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
-        const token = localStorage.getItem('token');
+        const token = getStoredToken();
         if (token) {
           config.headers.Authorization = `Token ${token}`;
         }

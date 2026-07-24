@@ -33,10 +33,11 @@ function VerifyEmailForm() {
     clearError, 
     isAuthenticated,
     isEmailVerified,
-    user
+    user,
+    pendingVerificationEmail,
   } = useAuth();
   
-  const [email, setEmail] = useState(emailParam || '');
+  const [email, setEmail] = useState(emailParam || pendingVerificationEmail || '');
   const [verificationCode, setVerificationCode] = useState(['', '', '', '', '', '']);
   const [resendDisabled, setResendDisabled] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
@@ -50,12 +51,14 @@ function VerifyEmailForm() {
     }
   }, [isAuthenticated, isEmailVerified, router]);
 
-  // Auto-fill email from user data
+  // Auto-fill email from user data or registration flow
   useEffect(() => {
     if (user?.email && !email) {
       setEmail(user.email);
+    } else if (pendingVerificationEmail && !email) {
+      setEmail(pendingVerificationEmail);
     }
-  }, [user, email]);
+  }, [user, email, pendingVerificationEmail]);
 
   // Resend timer
   useEffect(() => {

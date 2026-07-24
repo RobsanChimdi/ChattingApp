@@ -1,6 +1,7 @@
 // socket/socket.ts
 import io, { Socket } from 'socket.io-client';
 import { useAuthStore } from '@/store/authStore';
+import { authService } from '@/services/auth.service';
 
 interface CallbackFunction {
   (data: any): void;
@@ -167,11 +168,18 @@ class SocketService {
   private async _connect(): Promise<void> {
     try {
       const authState = useAuthStore.getState();
-      const token = authState.token;
       
-      // CRITICAL: Don't throw error, just return silently
-      if (!token || !authState.isAuthenticated) {
+      if (!authState.token || !authState.isAuthenticated) {
         console.log('No authentication token or not authenticated, skipping connection');
+        return;
+      }
+
+      let wsAuthToken: string;
+      try {
+        const wsTokenResponse = await authService.getWebSocketToken();
+        wsAuthToken = wsTokenResponse.token;
+      } catch (error) {
+        console.error('Failed to fetch WebSocket token:', error);
         return;
       }
 
@@ -187,7 +195,7 @@ class SocketService {
       console.log(`Connecting to WebSocket at: ${wsUrl}/ws/`);
 
       this.socket = io(`${wsUrl}/ws/`, {
-        auth: { token },
+        auth: { token: wsAuthToken },
         transports: ['websocket', 'polling'],
         reconnection: false,
         timeout: 10000,

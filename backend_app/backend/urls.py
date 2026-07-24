@@ -43,7 +43,10 @@ urlpatterns = [
     # ✉️ MESSAGES
     # =====================
     path('messages/create/', views.MessageCreateView.as_view(), name='create-message'),
+    path('messages/search/', views.MessageSearchView.as_view(), name='message-search'),
+    path('messages/mark-all-read/', views.MarkAllAsReadView.as_view(), name='mark-all-read'),
     path('messages/<int:pk>/', views.MessageDetailView.as_view(), name='message-detail'),
+    path('messages/<int:message_id>/mark-read/', views.MarkMessageAsReadView.as_view(), name='mark-message-read'),
     path('messages/<int:message_id>/forward/', views.ForwardMessageView.as_view(), name='forward-message'),
     path('messages/<int:message_id>/reactions/', views.MessageReactionView.as_view(), name='message-reactions'),
     path('messages/<int:message_id>/reactions/<str:emoji>/', views.RemoveMessageReactionView.as_view(), name='remove-reaction'),
@@ -52,6 +55,9 @@ urlpatterns = [
     # 🖼 MEDIA
     # =====================
     path('media/upload/', views.MediaUploadView.as_view(), name='media-upload'),
+    path('media/<int:media_id>/info/', views.MediaInfoView.as_view(), name='media-info'),
+    path('media/<int:media_id>/download/', views.MediaDownloadView.as_view(), name='media-download'),
+    path('media/chat/<int:chat_id>/', views.ChatMediaView.as_view(), name='chat-media'),
 
     # =====================
     # 📞 CALLS

@@ -38,7 +38,7 @@ export interface CallParticipant {
   id: number;
   call: number;
   user: User;  // Changed from number to User object
-  role: 'initiator' | 'caller' | 'callee' | 'participant';
+  role: 'participant';  // Backend only uses 'participant' role
   joined_at: string;
   left_at?: string;
   is_muted: boolean;
@@ -52,7 +52,7 @@ export interface CallParticipant {
 export interface CallParticipantCreate {
   call: number;
   user: number;
-  role?: 'initiator' | 'caller' | 'callee' | 'participant';
+  role?: 'participant';  // Backend only uses 'participant' role
   is_muted?: boolean;
   is_video_enabled?: boolean;
 }

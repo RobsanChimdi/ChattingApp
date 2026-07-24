@@ -17,7 +17,7 @@ class User(AbstractUser):
     is_online = models.BooleanField(default=False)
     
     # Additional useful fields for messaging apps
-    phone_number = models.CharField(max_length=20, blank=True, null=True, unique=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
     status = models.CharField(max_length=100, blank=True, null=True, default="Hey there! I'm using ChatApp")
     privacy_last_seen = models.CharField(
         max_length=20,

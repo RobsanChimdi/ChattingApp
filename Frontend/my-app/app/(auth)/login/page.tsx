@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isLoading, error, clearError, isAuthenticated } = useAuth();
+  const { login, isLoading, error, clearError, setLoading, isAuthenticated } = useAuth();
   
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
@@ -33,12 +33,22 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, router]);
 
-  // Clear error on unmount
+  // Reset form data when component mounts
+  useEffect(() => {
+    setFormData({
+      username: '',
+      password: ''
+    });
+    setFormErrors({});
+  }, []);
+
+  // Clear error and loading state on unmount
   useEffect(() => {
     return () => {
       clearError();
+      setLoading(false);
     };
-  }, [clearError]);
+  }, [clearError, setLoading]);
 
   const validateForm = () => {
     const errors: typeof formErrors = {};

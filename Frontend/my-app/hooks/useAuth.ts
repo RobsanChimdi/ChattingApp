@@ -13,8 +13,7 @@ interface UseAuthReturn {
   error: string | null;
   isEmailVerified: boolean;
   verificationEmailSent: boolean;
-  
-  // Authentication Actions
+  pendingVerificationEmail: string | null;
   login: (credentials: { username: string; password: string }) => Promise<void>;
   register: (data: {
     username: string;
@@ -53,6 +52,7 @@ interface UseAuthReturn {
   requireGuest: (redirectTo?: string) => boolean;
   requireVerified: (redirectTo?: string) => boolean;
   clearError: () => void;
+  setLoading: (loading: boolean) => void;
 }
 
 export const useAuth = (): UseAuthReturn => {
@@ -67,6 +67,7 @@ export const useAuth = (): UseAuthReturn => {
     error,
     isEmailVerified,
     verificationEmailSent,
+    pendingVerificationEmail,
     login: loginAction,
     register: registerAction,
     logout: logoutAction,
@@ -80,6 +81,7 @@ export const useAuth = (): UseAuthReturn => {
     getWebSocketToken,
     setError,
     clearError: clearErrorAction,
+    setLoading: setLoadingAction,
   } = useAuthStore();
 
   // FIXED: Only connect socket when authenticated AND email verified
@@ -204,10 +206,14 @@ export const useAuth = (): UseAuthReturn => {
           return;
         }
 
-        const redirectPath = sessionStorage.getItem('redirectAfterLogin') || '/';
+        const redirectPath = sessionStorage.getItem('redirectAfterLogin') || '/dashboard';
         sessionStorage.removeItem('redirectAfterLogin');
         router.push(redirectPath);
-      } catch (error) {
+      } catch (error: any) {
+        const errorMessage = error.response?.data?.error || '';
+        if (error.response?.status === 403 && errorMessage.toLowerCase().includes('verify')) {
+          router.push('/verify-email');
+        }
         throw error;
       }
     },
@@ -228,7 +234,7 @@ export const useAuth = (): UseAuthReturn => {
       try {
         await registerAction(data);
         clearErrorAction();
-        router.push('/verify-email');
+        router.push(`/verify-email?email=${encodeURIComponent(data.email)}`);
       } catch (error) {
         throw error;
       }
@@ -259,7 +265,7 @@ export const useAuth = (): UseAuthReturn => {
         clearErrorAction();
         
         if (result) {
-          router.push('/');
+          router.push('/dashboard');
         }
         
         return result;
@@ -369,6 +375,10 @@ export const useAuth = (): UseAuthReturn => {
     clearErrorAction();
   }, [clearErrorAction]);
 
+  const setLoading = useCallback((loading: boolean): void => {
+    setLoadingAction(loading);
+  }, [setLoadingAction]);
+
   return {
     user,
     isAuthenticated,
@@ -376,6 +386,7 @@ export const useAuth = (): UseAuthReturn => {
     error,
     isEmailVerified,
     verificationEmailSent,
+    pendingVerificationEmail,
     login,
     register,
     logout,
@@ -391,6 +402,7 @@ export const useAuth = (): UseAuthReturn => {
     requireGuest,
     requireVerified,
     clearError,
+    setLoading,
   };
 };
 

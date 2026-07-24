@@ -1,6 +1,7 @@
 // services/auth.service.ts
 import { api } from './api';
 import type { User } from '@/types/user.types';
+import { extractErrorMessage } from '@/utils/errorHandler';
 
 export interface LoginResponse {
   token: string;
@@ -41,7 +42,11 @@ class AuthService {
   private readonly baseUrl = '';
 
   async login(credentials: { username: string; password: string }): Promise<LoginResponse> {
-    return await api.post<LoginResponse>(`/auth/login/`, credentials);
+    try {
+      return await api.post<LoginResponse>(`/auth/login/`, credentials);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async register(data: {
@@ -54,31 +59,46 @@ class AuthService {
     bio?: string;
     phone_number?: string;
   }): Promise<RegisterResponse> {
-    return await api.post<RegisterResponse>(`/auth/register/`, data);
+    try {
+      return await api.post<RegisterResponse>(`/auth/register/`, data);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async logout(): Promise<void> {
     try {
       await api.post(`/auth/logout/`);
     } finally {
-      // Clear storage
+      api.removeToken();
       if (typeof window !== 'undefined') {
         localStorage.removeItem('auth-storage');
-        localStorage.removeItem('token');
       }
     }
   }
 
   async verifyEmail(data: { email: string; verification_code: string }): Promise<VerifyEmailResponse> {
-    return await api.post<VerifyEmailResponse>(`/auth/verify-email/`, data);
+    try {
+      return await api.post<VerifyEmailResponse>(`/auth/verify-email/`, data);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async resendVerificationCode(email: string): Promise<{ message: string }> {
-    return await api.post<{ message: string }>(`/auth/resend-verification/`, { email });
+    try {
+      return await api.post<{ message: string }>(`/auth/resend-verification/`, { email });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async requestPasswordReset(email: string): Promise<PasswordResetResponse> {
-    return await api.post<PasswordResetResponse>(`/auth/password-reset-request/`, { email });
+    try {
+      return await api.post<PasswordResetResponse>(`/auth/password-reset-request/`, { email });
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async resetPassword(data: { 
@@ -86,38 +106,71 @@ class AuthService {
     new_password: string; 
     confirm_password: string;
   }): Promise<PasswordResetResponse> {
-    return await api.post<PasswordResetResponse>(`/auth/password-reset-confirm/`, data);
+    try {
+      return await api.post<PasswordResetResponse>(`/auth/password-reset-confirm/`, data);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async updateProfile(data: FormData | Partial<User>): Promise<User> {
-    const isFormData = data instanceof FormData;
-    const config = isFormData ? { headers: { 'Content-Type': 'multipart/form-data' } } : undefined;
-    return await api.patch<User>(`/users/me/update/`, data, config);
+    try {
+      const isFormData = data instanceof FormData;
+      const config = isFormData ? { headers: { 'Content-Type': 'multipart/form-data' } } : undefined;
+      return await api.patch<User>(`/users/me/update/`, data, config);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async updateLastSeen(): Promise<{ status: string }> {
-    return await api.post<{ status: string }>(`/users/me/update-last-seen/`);
+    try {
+      return await api.post<{ status: string }>(`/users/me/update-last-seen/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async setOffline(): Promise<{ status: string }> {
-    return await api.post<{ status: string }>(`/users/me/set-offline/`);
+    try {
+      return await api.post<{ status: string }>(`/users/me/set-offline/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async getWebSocketToken(): Promise<WebSocketTokenResponse> {
-    return await api.get<WebSocketTokenResponse>(`/auth/websocket-token/`);
+    try {
+      return await api.get<WebSocketTokenResponse>(`/auth/websocket-token/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async getUserProfile(userId?: number): Promise<User> {
-    const url = userId ? `/users/${userId}/` : '/users/me/';
-    return await api.get<User>(url);
+    try {
+      const url = userId ? `/users/${userId}/` : '/users/me/';
+      return await api.get<User>(url);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async searchUsers(query: string): Promise<User[]> {
-    return await api.get<User[]>(`/users/search/`, { params: { q: query } });
+    try {
+      const response = await api.get<{ results: User[] } | User[]>(`/users/search/`, { params: { q: query } });
+      return Array.isArray(response) ? response : response.results;
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 
   async getUserOnlineStatus(userId: number): Promise<UserOnlineStatus> {
-    return await api.get<UserOnlineStatus>(`/users/${userId}/online-status/`);
+    try {
+      return await api.get<UserOnlineStatus>(`/users/${userId}/online-status/`);
+    } catch (error) {
+      throw new Error(extractErrorMessage(error));
+    }
   }
 }
 

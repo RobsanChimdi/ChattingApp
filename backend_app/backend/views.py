@@ -93,7 +93,24 @@ class RegisterView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            # Format validation errors for frontend
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    # Field-specific errors
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
         user = serializer.save(is_verified=False)
 
         # Generate verification code
@@ -130,7 +147,20 @@ class VerifyEmailView(APIView):
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data['email']
         code = serializer.validated_data['verification_code']
@@ -217,15 +247,15 @@ class LoginView(APIView):
         user = authenticate(username=username, password=password)
 
         if not user:
-            return Response({'error': 'Invalid credentials'}, 
+            return Response({'error': 'Invalid username or password'}, 
                           status=status.HTTP_401_UNAUTHORIZED)
 
         if not user.is_verified:
-            return Response({'error': 'Email not verified'}, 
+            return Response({'error': 'Please verify your email before logging in'}, 
                           status=status.HTTP_403_FORBIDDEN)
 
         if not user.is_active:
-            return Response({'error': 'Account is disabled'}, 
+            return Response({'error': 'Your account has been disabled. Please contact support.'}, 
                           status=status.HTTP_403_FORBIDDEN)
 
         # Update last seen
@@ -256,7 +286,20 @@ class PasswordResetRequestView(APIView):
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data['email']
 
@@ -294,7 +337,20 @@ class PasswordResetConfirmView(APIView):
 
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         token = serializer.validated_data['reset_token']
         new_password = serializer.validated_data['new_password']
@@ -367,6 +423,24 @@ class UpdateProfileView(generics.UpdateAPIView):
     def get_object(self):
         return self.request.user
     
+    def update(self, request, *args, **kwargs):
+        try:
+            return super().update(request, *args, **kwargs)
+        except ValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
     def perform_update(self, serializer):
         # Handle profile image upload properly
         profile_image = self.request.FILES.get('profile_image')
@@ -420,6 +494,24 @@ class UserSearchView(generics.ListAPIView):
         cache.set(cache_key, queryset, 30)
         
         return queryset
+    
+    def list(self, request, *args, **kwargs):
+        # Override to return consistent response format
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # If no pagination needed (small result set), return array directly
+        if queryset.count() <= 50:
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+        
+        # Otherwise use pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
 
 class UserDetailView(generics.RetrieveAPIView):
@@ -533,6 +625,22 @@ class ChatListCreateView(generics.ListCreateAPIView):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+    
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
     def perform_create(self, serializer):
         chat = serializer.save()
@@ -741,6 +849,22 @@ class UpdateChatInfoView(generics.UpdateAPIView):
     serializer_class = ChatUpdateSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     
+    def update(self, request, *args, **kwargs):
+        try:
+            return super().update(request, *args, **kwargs)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
     def get_object(self):
         chat_id = self.kwargs.get('chat_id')
         chat = get_object_or_404(Chat, id=chat_id, is_active=True)
@@ -864,11 +988,23 @@ class MessageCreateView(generics.CreateAPIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     def create(self, request, *args, **kwargs):
-        # Handle file uploads if present
-        if request.FILES:
-            return self._create_with_files(request, *args, **kwargs)
-        
-        return super().create(request, *args, **kwargs)
+        try:
+            # Handle file uploads if present
+            if request.FILES:
+                return self._create_with_files(request, *args, **kwargs)
+            return super().create(request, *args, **kwargs)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
     def _create_with_files(self, request, *args, **kwargs):
         """Create message with file attachments"""
@@ -947,60 +1083,69 @@ class MediaUploadView(generics.CreateAPIView):
     parser_classes = [MultiPartParser, FormParser]
     
     def create(self, request, *args, **kwargs):
-        # Create a message first if message_id not provided
-        if not request.data.get('message'):
-            chat_id = request.data.get('chat_id')
-            if not chat_id:
-                return Response(
-                    {"error": "Either message or chat_id is required"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+        try:
+            # Create a message first if message_id not provided
+            if not request.data.get('message'):
+                chat_id = request.data.get('chat_id')
+                if not chat_id:
+                    return Response(
+                        {"error": "Either message or chat_id is required"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                try:
+                    chat = Chat.objects.get(id=chat_id, is_active=True)
+                    
+                    # Check if user is participant
+                    if not chat.participants.filter(id=request.user.id).exists():
+                        raise PermissionDenied("Not a participant in this chat")
+                    
+                    # Determine message type from file
+                    file = request.FILES.get('file')
+                    if not file:
+                        return Response({"error": "file is required"}, 
+                                      status=status.HTTP_400_BAD_REQUEST)
+                    
+                    # Validate file size
+                    if file.size > 50 * 1024 * 1024:
+                        return Response({"error": "File exceeds 50MB limit"}, 
+                                      status=status.HTTP_400_BAD_REQUEST)
+                    
+                    message_type = 'file'
+                    mime_type, _ = mimetypes.guess_type(file.name)
+                    if mime_type:
+                        if mime_type.startswith('image/'):
+                            message_type = 'image'
+                        elif mime_type.startswith('video/'):
+                            message_type = 'video'
+                        elif mime_type.startswith('audio/'):
+                            message_type = 'audio'
+                    
+                    # Create message
+                    message = Message.objects.create(
+                        chat=chat,
+                        sender=request.user,
+                        message_type=message_type,
+                        text=file.name
+                    )
+                    request.data['message'] = message.id
+                except Chat.DoesNotExist:
+                    return Response({"error": "Chat not found"}, 
+                                  status=status.HTTP_404_NOT_FOUND)
             
-            try:
-                chat = Chat.objects.get(id=chat_id, is_active=True)
-                
-                # Check if user is participant
-                if not chat.participants.filter(id=request.user.id).exists():
-                    raise PermissionDenied("Not a participant in this chat")
-                
-                # Determine message type from file
-                file = request.FILES.get('file')
-                if not file:
-                    return Response({"error": "file is required"}, 
-                                  status=status.HTTP_400_BAD_REQUEST)
-                
-                # Validate file size
-                if file.size > 50 * 1024 * 1024:
-                    return Response({"error": "File exceeds 50MB limit"}, 
-                                  status=status.HTTP_400_BAD_REQUEST)
-                
-                message_type = 'file'
-                mime_type, _ = mimetypes.guess_type(file.name)
-                if mime_type:
-                    if mime_type.startswith('image/'):
-                        message_type = 'image'
-                    elif mime_type.startswith('video/'):
-                        message_type = 'video'
-                    elif mime_type.startswith('audio/'):
-                        message_type = 'audio'
-                
-                # Create message
-                message = Message.objects.create(
-                    chat=chat,
-                    sender=request.user,
-                    message_type=message_type
-                )
-                request.data['message'] = message.id
-                
-                # Clear unread count cache
-                for participant in chat.participants.all():
-                    cache.delete(f'unread_counts_{participant.id}')
-                
-            except Chat.DoesNotExist:
-                return Response({"error": "Chat not found"}, 
-                              status=status.HTTP_404_NOT_FOUND)
-        
-        return super().create(request, *args, **kwargs)
+            return super().create(request, *args, **kwargs)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                if isinstance(e.detail, dict):
+                    error_messages = []
+                    for field, errors in e.detail.items():
+                        if isinstance(errors, list):
+                            error_messages.extend([f"{field}: {err}" for err in errors])
+                        else:
+                            error_messages.append(f"{field}: {errors}")
+                    return Response({"error": ". ".join(error_messages)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(e.detail)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class MessageDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -1140,6 +1285,139 @@ class ForwardMessageView(APIView):
         
         serializer = MessageSerializer(forwarded_message, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class MarkAllAsReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        chat_id = request.data.get('chat_id')
+        if not chat_id:
+            return Response({"error": "chat_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        chat = get_object_or_404(Chat, id=chat_id, is_active=True)
+        if not chat.participants.filter(id=request.user.id).exists():
+            raise PermissionDenied("Not a participant in this chat")
+
+        before = timezone.now()
+        updated = MessageStatus.objects.filter(
+            message__chat=chat,
+            user=request.user,
+            status__in=['sent', 'delivered']
+        ).update(status='read', read_at=before)
+
+        cache.delete(f'unread_counts_{request.user.id}')
+        return Response({"count": updated})
+
+
+class MarkMessageAsReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, message_id):
+        message = get_object_or_404(
+            Message,
+            id=message_id,
+            chat__participants=request.user,
+            chat__is_active=True,
+            is_deleted=False
+        )
+
+        status_obj, _ = MessageStatus.objects.get_or_create(
+            message=message,
+            user=request.user,
+            defaults={'status': 'read', 'read_at': timezone.now()}
+        )
+
+        if status_obj.status != 'read':
+            status_obj.status = 'read'
+            status_obj.read_at = timezone.now()
+            status_obj.save(update_fields=['status', 'read_at', 'updated_at'])
+
+        cache.delete(f'unread_counts_{request.user.id}')
+        return Response({"status": "read"})
+
+
+class MessageSearchView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = MessageSerializer
+    pagination_class = StandardPagination
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    def get_queryset(self):
+        query = self.request.query_params.get('q', '').strip()
+        if len(query) < 2:
+            return Message.objects.none()
+
+        queryset = Message.objects.filter(
+            chat__participants=self.request.user,
+            chat__is_active=True,
+            is_deleted=False
+        ).filter(
+            Q(text__icontains=query)
+        ).select_related('sender', 'reply_to').prefetch_related('media', 'reactions__user', 'statuses__user')
+
+        chat_id = self.request.query_params.get('chat_id')
+        if chat_id:
+            queryset = queryset.filter(chat_id=chat_id)
+
+        return queryset.order_by('-created_at')
+
+
+class MediaInfoView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, media_id):
+        media = get_object_or_404(
+            MessageMedia,
+            id=media_id,
+            message__chat__participants=request.user,
+            message__chat__is_active=True
+        )
+        serializer = MessageMediaSerializer(media, context={'request': request})
+        return Response(serializer.data)
+
+
+class MediaDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, media_id):
+        media = get_object_or_404(
+            MessageMedia,
+            id=media_id,
+            message__chat__participants=request.user,
+            message__chat__is_active=True
+        )
+        if not media.file:
+            return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        download_url = request.build_absolute_uri(media.file.url)
+        return Response({"download_url": download_url})
+
+
+class ChatMediaView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = MessageMediaSerializer
+    pagination_class = StandardPagination
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    def get_queryset(self):
+        chat_id = self.kwargs.get('chat_id')
+        chat = get_object_or_404(Chat, id=chat_id, is_active=True)
+        if not chat.participants.filter(id=self.request.user.id).exists():
+            raise PermissionDenied("Not a participant in this chat")
+
+        return MessageMedia.objects.filter(
+            message__chat=chat,
+            message__is_deleted=False
+        ).select_related('message').order_by('-uploaded_at')
 
 
 # ========== CALL VIEWS ==========
