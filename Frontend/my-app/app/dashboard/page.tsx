@@ -7,6 +7,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { useChat } from '@/hooks/useChat';
 import { useCall } from '@/hooks/useCall';
 import { useSocket } from '@/hooks/useSocket';
+import { callService } from '@/services/call.service';
+import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -93,65 +95,68 @@ export default function DashboardPage() {
         id: chat.id,
         name: chat.name || chat.participants?.[0]?.username || 'Unknown',
         avatar: chat.avatar || chat.participants?.[0]?.profile_image,
-        lastMessage: chat.last_message?.content,
+        lastMessage: chat.last_message?.text || chat.last_message?.content,
         lastMessageTime: chat.last_message?.created_at,
         unreadCount: chat.unread_count || 0,
-        type: chat.type
+        type: chat.chat_type === 'group' ? 'group' : 'direct'
       }));
 
       setRecentChats(processedChats);
 
-      // Mock recent calls data (replace with actual API call)
-      const mockCalls: RecentCall[] = [
-        {
-          id: '1',
+      // Fetch real calls data
+      const callsData = await callService.getUserCalls();
+      const processedCalls: RecentCall[] = callsData.slice(0, 5).map((call: any) => {
+        const otherParticipant = call.participants?.find((p: any) => p.user.id !== user?.id);
+        const isInitiator = call.initiated_by === user?.id;
+        const isMissed = call.status === 'missed' || call.status === 'rejected';
+        
+        return {
+          id: call.id.toString(),
           with: {
-            id: '2',
-            name: 'John Doe',
-            avatar: '/avatars/john.jpg'
+            id: otherParticipant?.user.id?.toString() || 'unknown',
+            name: otherParticipant?.user.username || 'Unknown',
+            avatar: otherParticipant?.user.profile_image
           },
-          type: 'video',
-          direction: 'outgoing',
-          duration: 125,
-          timestamp: new Date(Date.now() - 3600000).toISOString()
-        },
-        {
-          id: '2',
-          with: {
-            id: '3',
-            name: 'Jane Smith',
-            avatar: '/avatars/jane.jpg'
-          },
-          type: 'audio',
-          direction: 'incoming',
-          duration: 320,
-          timestamp: new Date(Date.now() - 86400000).toISOString()
-        },
-        {
-          id: '3',
-          with: {
-            id: '4',
-            name: 'Mike Johnson',
-            avatar: '/avatars/mike.jpg'
-          },
-          type: 'video',
-          direction: 'missed',
-          timestamp: new Date(Date.now() - 172800000).toISOString()
-        }
-      ];
+          type: call.call_type,
+          direction: isMissed && !isInitiator ? 'missed' : (isInitiator ? 'outgoing' : 'incoming'),
+          duration: call.call_duration,
+          timestamp: call.started_at
+        };
+      });
 
-      setRecentCalls(mockCalls);
+      setRecentCalls(processedCalls);
 
-      // Calculate stats
+      // Fetch real statistics
+      const statsData = await api.get<any>('/users/statistics/');
+      
+      // Count online contacts from chat participants
+      const onlineContactsCount = new Set<number>();
+      chatsData.forEach((chat: any) => {
+        chat.participants?.forEach((participant: any) => {
+          if (participant.user.id !== user?.id && participant.user.is_online) {
+            onlineContactsCount.add(participant.user.id);
+          }
+        });
+      });
+      
       setStats({
-        totalChats: chatsData.length,
-        totalCalls: 42, // Mock data
+        totalChats: statsData.chats?.total || chatsData.length,
+        totalCalls: statsData.calls?.total || callsData.length,
         unreadMessages: processedChats.reduce((acc, chat) => acc + chat.unreadCount, 0),
-        onlineContacts: 8 // Mock data
+        onlineContacts: onlineContactsCount.size
       });
 
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
+      // Fallback to empty data on error
+      setRecentChats([]);
+      setRecentCalls([]);
+      setStats({
+        totalChats: 0,
+        totalCalls: 0,
+        unreadMessages: 0,
+        onlineContacts: 0
+      });
     } finally {
       setIsLoading(false);
     }
@@ -341,7 +346,7 @@ export default function DashboardPage() {
         <Card className="p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold">Recent Chats</h2>
-            <Link href="/chat">
+            <Link href="/dashboard/chat">
               <Button variant="ghost" size="sm">
                 View All
                 <ArrowRight className="h-4 w-4 ml-2" />
@@ -403,7 +408,7 @@ export default function DashboardPage() {
         <Card className="p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold">Recent Calls</h2>
-            <Link href="/calls">
+            <Link href="/dashboard/call">
               <Button variant="ghost" size="sm">
                 View All
                 <ArrowRight className="h-4 w-4 ml-2" />
@@ -479,7 +484,7 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             className="h-auto py-4 flex flex-col items-center space-y-2"
-            onClick={() => router.push('/chat')}
+            onClick={() => router.push('/dashboard/chat')}
           >
             <MessageSquare className="h-6 w-6" />
             <span>New Message</span>
@@ -488,7 +493,7 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             className="h-auto py-4 flex flex-col items-center space-y-2"
-            onClick={() => router.push('/calls')}
+            onClick={() => router.push('/dashboard/call/setup')}
           >
             <Phone className="h-6 w-6" />
             <span>Start Audio Call</span>
@@ -497,7 +502,7 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             className="h-auto py-4 flex flex-col items-center space-y-2"
-            onClick={() => router.push('/calls')}
+            onClick={() => router.push('/dashboard/call/setup')}
           >
             <Video className="h-6 w-6" />
             <span>Start Video Call</span>
@@ -506,7 +511,7 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             className="h-auto py-4 flex flex-col items-center space-y-2"
-            onClick={() => router.push('/contacts')}
+            onClick={() => router.push('/dashboard/contacts')}
           >
             <Users className="h-6 w-6" />
             <span>Add Contact</span>

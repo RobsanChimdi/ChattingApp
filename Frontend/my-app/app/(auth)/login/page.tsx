@@ -26,6 +26,7 @@ export default function LoginPage() {
     username?: string;
     password?: string;
   }>({});
+  const [showVerificationPrompt, setShowVerificationPrompt] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -74,8 +75,13 @@ export default function LoginPage() {
     
     try {
       await login(formData);
-    } catch (error) {
-      // Error is handled by the hook
+    } catch (error: any) {
+      // Check if error is about unverified email
+      if (error?.response?.data?.error?.includes('verify') || 
+          error?.response?.data?.error?.includes('verified') ||
+          error?.message?.includes('verify')) {
+        setShowVerificationPrompt(true);
+      }
     }
   };
 
@@ -104,9 +110,41 @@ export default function LoginPage() {
         
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
-            {error && (
+            {error && !showVerificationPrompt && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {showVerificationPrompt && (
+              <Alert variant="default" className="bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800">
+                <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+                  <div className="space-y-2">
+                    <p className="font-medium">Your account is not verified</p>
+                    <p className="text-sm">Please verify your email address to continue.</p>
+                    <div className="flex gap-2 mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push('/verify-email')}
+                        className="h-8"
+                      >
+                        Verify Email
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setShowVerificationPrompt(false);
+                          clearError();
+                        }}
+                        className="h-8"
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                  </div>
+                </AlertDescription>
               </Alert>
             )}
 
