@@ -51,8 +51,10 @@ export default function ContactsPage() {
   const loadContacts = async () => {
     setIsLoading(true);
     try {
-      const response = await api.get<Contact[]>('/users/');
-      setContacts(response);
+      const response = await api.get<any[]>('/contacts/');
+      // Extract contact user data from the response
+      const contactUsers = response.map((contact: any) => contact.contact_user);
+      setContacts(contactUsers);
     } catch (error) {
       console.error('Failed to load contacts:', error);
     } finally {

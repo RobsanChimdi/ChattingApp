@@ -33,40 +33,10 @@ class SocketService {
   // ========== PUBLIC API ==========
 
   async connect(): Promise<void> {
-    // Prevent multiple connection attempts
-    if (this.isConnecting) {
-      console.log('Connection already in progress, waiting...');
-      return this.connectionPromise || Promise.resolve();
-    }
-
-    if (this.connectionPromise) {
-      return this.connectionPromise;
-    }
-
-    if (this.isManuallyDisconnected) {
-      console.log('Manually disconnected, not connecting');
-      return;
-    }
-
-    // Check if authenticated before attempting to connect
-    const authState = useAuthStore.getState();
-    if (!authState.isAuthenticated || !authState.token) {
-      console.log('Not authenticated, skipping socket connection');
-      return;
-    }
-
-    this.isConnecting = true;
-    this.connectionPromise = this._connect();
-    
-    try {
-      await this.connectionPromise;
-    } catch (error) {
-      console.error('Connection failed:', error);
-    } finally {
-      this.isConnecting = false;
-    }
-    
-    return this.connectionPromise;
+    // WebSocket server is not available, skip connection
+    console.log('WebSocket server not available, skipping connection');
+    this.isManuallyDisconnected = true;
+    return;
   }
 
   disconnect(): void {
@@ -278,6 +248,9 @@ class SocketService {
       this.reconnectAttempts++;
       if (this.reconnectAttempts <= this.maxReconnectAttempts) {
         this.scheduleReconnect();
+      } else {
+        console.log('WebSocket server not available, disabling reconnection');
+        this.isManuallyDisconnected = true;
       }
     });
 

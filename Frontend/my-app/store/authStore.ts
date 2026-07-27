@@ -517,19 +517,22 @@ export const useAuthStore = create<AuthState & AuthActions>()(
 
         try {
 
-          const updatedUser = await authService.updateProfile(data);
+          await authService.updateProfile(data);
+          
+          // Fetch fresh user data to get the updated profile image URL
+          const freshUser = await authService.getUserProfile();
 
           set({ 
 
-            user: updatedUser, 
+            user: freshUser, 
 
             isLoading: false,
 
-            isEmailVerified: updatedUser.is_verified,
+            isEmailVerified: freshUser.is_verified,
 
           });
 
-          return updatedUser;
+          return freshUser;
 
         } catch (error: any) {
 
@@ -677,16 +680,29 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           if (state?.token) {
             api.setToken(state.token);
             
-            // Fetch fresh user data to ensure latest online status
+            // Fetch fresh user data to ensure latest online status and validate token
             authService.getUserProfile()
               .then(freshUser => {
                 if (state) {
                   state.user = freshUser;
+                  state.isAuthenticated = true;
                 }
               })
               .catch(error => {
-                console.error('Failed to fetch fresh user data on rehydration:', error);
+                console.error('Failed to fetch fresh user data on rehydration, clearing auth:', error);
+                // Token is invalid, clear authentication state
+                if (state) {
+                  state.user = null;
+                  state.token = null;
+                  state.isAuthenticated = false;
+                  state.isEmailVerified = false;
+                }
+                localStorage.removeItem('auth-storage');
+                localStorage.removeItem('token');
               });
+          } else {
+            // No token, ensure authentication state is cleared
+            state.isAuthenticated = false;
           }
         }
       },

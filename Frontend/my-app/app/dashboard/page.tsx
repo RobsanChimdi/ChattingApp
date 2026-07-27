@@ -127,7 +127,7 @@ export default function DashboardPage() {
       setRecentCalls(processedCalls);
 
       // Fetch real statistics
-      const statsData = await api.get<any>('/users/statistics/');
+      const statsData = await api.get<any>('/statistics/');
       
       // Count online contacts from chat participants
       const onlineContactsCount = new Set<number>();

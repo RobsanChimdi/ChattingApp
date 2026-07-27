@@ -160,7 +160,7 @@ export default function SettingsPage() {
                 {/* Profile Image */}
                 <div className="flex items-center space-x-4">
                   <Avatar className="h-20 w-20">
-                    <AvatarImage src={previewImage} />
+                    <AvatarImage src={previewImage || undefined} />
                     <AvatarFallback className="text-2xl">
                       {formData.username?.charAt(0).toUpperCase()}
                     </AvatarFallback>
