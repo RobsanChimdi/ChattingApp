@@ -182,7 +182,7 @@ export const useCall = (callId?: number): UseCallReturn => {
     
     setTimeout(() => {
       if (activeCall?.chat) {
-        router.push(`/chat/${activeCall.chat}`);
+        router.push(`/dashboard/chat/${activeCall.chat}`);
       }
     }, 2000);
   }, [activeCall, leaveCallAction, router, webRTC]);
@@ -241,7 +241,7 @@ export const useCall = (callId?: number): UseCallReturn => {
       stopRingtone();
       webRTC.cleanup();
       if (activeCall.chat) {
-        router.push(`/chat/${activeCall.chat}`);
+        router.push(`/dashboard/chat/${activeCall.chat}`);
       }
     } catch (error: any) {
       setLocalError(error.message || 'Failed to leave call');
@@ -256,7 +256,7 @@ export const useCall = (callId?: number): UseCallReturn => {
       stopRingtone();
       webRTC.cleanup();
       if (activeCall.chat) {
-        router.push(`/chat/${activeCall.chat}`);
+        router.push(`/dashboard/chat/${activeCall.chat}`);
       }
     } catch (error: any) {
       setLocalError(error.message || 'Failed to end call');

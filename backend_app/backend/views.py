@@ -27,7 +27,7 @@ import logging
 
 from .models import (
     User, Chat, Message, MessageMedia, MessageStatus, 
-    MessageReaction, Call, CallParticipant, CallQuality
+    MessageReaction, Call, CallParticipant, CallQuality, Contact
 )
 from .serializers import (
     UserSerializer, UserProfileSerializer, ChatSerializer, ChatUpdateSerializer, 
@@ -36,7 +36,8 @@ from .serializers import (
     CallParticipantSerializer, CallQualitySerializer, CallUpdateSerializer,
     MessageSummarySerializer, CallJoinSerializer,
     PasswordResetSerializer, EmailVerificationSerializer,
-    PasswordResetRequestSerializer, WebSocketTokenSerializer
+    PasswordResetRequestSerializer, WebSocketTokenSerializer,
+    ContactSerializer, AddContactSerializer
 )
 
 # Set up logging
@@ -473,7 +474,7 @@ class UserSearchView(generics.ListAPIView):
     
     def get_queryset(self):
         query = self.request.query_params.get('q', '')
-        if not query or len(query) < 2:
+        if not query:
             return User.objects.none()
         
         # Check cache for search results
@@ -606,20 +607,12 @@ class ChatListCreateView(generics.ListCreateAPIView):
     
     def get_queryset(self):
         return Chat.objects.filter(
-            participants=self.request.user,
-            is_active=True
+            participants=self.request.user
+        ).filter(
+            Q(is_active=True) | Q(is_active__isnull=True)
         ).select_related('admin').prefetch_related(
-            Prefetch('participants', queryset=User.objects.only(
-                'id', 'username', 'first_name', 'last_name', 
-                'profile_image', 'is_online', 'last_seen'
-            )),
-            Prefetch('messages', queryset=Message.objects.filter(
-                is_deleted=False
-            ).select_related('sender').only(
-                'id', 'sender', 'message_type', 'text', 
-                'created_at', 'is_edited', 'is_deleted'
-            ).order_by('-created_at')[:1])
-        ).order_by('-updated_at')
+            Prefetch('participants', queryset=User.objects.all())
+        ).distinct().order_by('-updated_at')
     
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -654,14 +647,15 @@ class ChatDetailView(generics.RetrieveAPIView):
     
     def get_queryset(self):
         return Chat.objects.filter(
-            participants=self.request.user,
-            is_active=True
+            participants=self.request.user
+        ).filter(
+            Q(is_active=True) | Q(is_active__isnull=True)
         ).select_related('admin').prefetch_related(
             Prefetch('participants', queryset=User.objects.only(
                 'id', 'username', 'first_name', 'last_name', 
                 'profile_image', 'is_online', 'last_seen'
             ))
-        )
+        ).distinct()
     
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -689,39 +683,46 @@ class CreatePrivateChatView(APIView):
             return Response({"error": "User not found"}, 
                           status=status.HTTP_404_NOT_FOUND)
         
-        # Check cache for existing chat
-        cache_key = f'private_chat_{min(request.user.id, participant.id)}_{max(request.user.id, participant.id)}'
-        existing_chat_id = cache.get(cache_key)
-        
-        if existing_chat_id:
-            try:
-                existing_chat = Chat.objects.get(id=existing_chat_id)
-                serializer = ChatSerializer(existing_chat, context={'request': request})
-                return Response(serializer.data)
-            except Chat.DoesNotExist:
-                cache.delete(cache_key)
-        
         # Check if private chat already exists
         existing_chat = Chat.objects.filter(
             chat_type='private',
             participants=request.user
-        ).filter(participants=participant).first()
+        ).filter(
+            participants=participant
+        ).prefetch_related('participants').first()
         
         if existing_chat:
-            # Cache the result
-            cache.set(cache_key, existing_chat.id, 3600)
-            serializer = ChatSerializer(existing_chat, context={'request': request})
-            return Response(serializer.data)
+            # Verify it has exactly these two participants
+            participant_ids = set(existing_chat.participants.values_list('id', flat=True))
+            if participant_ids == {request.user.id, participant.id}:
+                serializer = ChatSerializer(existing_chat, context={'request': request})
+                return Response(serializer.data)
         
-        # Create new private chat
-        chat = Chat.objects.create(chat_type='private')
-        chat.participants.add(request.user, participant)
+        # Create new private chat using transaction to ensure atomicity
+        from django.db import transaction
         
-        # Cache the new chat
-        cache.set(cache_key, chat.id, 3600)
-        
-        serializer = ChatSerializer(chat, context={'request': request})
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        with transaction.atomic():
+            # Double-check inside transaction to prevent race conditions
+            existing_chat = Chat.objects.filter(
+                chat_type='private',
+                participants=request.user
+            ).filter(
+                participants=participant
+            ).prefetch_related('participants').first()
+            
+            if existing_chat:
+                # Verify it has exactly these two participants
+                participant_ids = set(existing_chat.participants.values_list('id', flat=True))
+                if participant_ids == {request.user.id, participant.id}:
+                    serializer = ChatSerializer(existing_chat, context={'request': request})
+                    return Response(serializer.data)
+            
+            # Create new private chat
+            chat = Chat.objects.create(chat_type='private', is_active=True)
+            chat.participants.add(request.user, participant)
+            
+            serializer = ChatSerializer(chat, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class AddParticipantView(APIView):
@@ -987,13 +988,45 @@ class MessageCreateView(generics.CreateAPIView):
     serializer_class = MessageSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     
+    def perform_create(self, serializer):
+        serializer.save(sender=self.request.user)
+    
     def create(self, request, *args, **kwargs):
         try:
+            # Validate chat exists and user is participant before serializer validation
+            chat_id = request.data.get('chat')
+            if not chat_id:
+                return Response({"error": "chat is required"}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                chat = Chat.objects.filter(
+                    id=chat_id
+                ).filter(
+                    Q(is_active=True) | Q(is_active__isnull=True)
+                ).first()
+                
+                if not chat:
+                    return Response({"error": "Chat not found"}, 
+                                  status=status.HTTP_404_NOT_FOUND)
+                
+                if not chat.participants.filter(id=request.user.id).exists():
+                    return Response({"error": "Not a participant in this chat"}, 
+                                  status=status.HTTP_403_FORBIDDEN)
+            except Exception:
+                return Response({"error": "Chat not found"}, 
+                              status=status.HTTP_404_NOT_FOUND)
+            
             # Handle file uploads if present
             if request.FILES:
                 return self._create_with_files(request, *args, **kwargs)
             return super().create(request, *args, **kwargs)
         except Exception as e:
+            # Log the error for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Message creation error: {str(e)}", exc_info=True)
+            
             if hasattr(e, 'detail'):
                 if isinstance(e.detail, dict):
                     error_messages = []
@@ -1017,19 +1050,32 @@ class MessageCreateView(generics.CreateAPIView):
                           status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            chat = Chat.objects.get(id=chat_id, is_active=True)
+            chat = Chat.objects.filter(
+                id=chat_id
+            ).filter(
+                Q(is_active=True) | Q(is_active__isnull=True)
+            ).first()
+            
+            if not chat:
+                return Response({"error": "Chat not found"}, 
+                              status=status.HTTP_404_NOT_FOUND)
+            
             if not chat.participants.filter(id=request.user.id).exists():
                 raise PermissionDenied("Not a participant in this chat")
         except Chat.DoesNotExist:
             return Response({"error": "Chat not found"}, 
                           status=status.HTTP_404_NOT_FOUND)
         
-        # Determine message type from files
+        # Determine message type from files if not already provided
         files = request.FILES.getlist('files')
-        if files:
+        if files and not data.get('message_type'):
             # Set message type based on first file
             first_file = files[0]
-            mime_type, _ = mimetypes.guess_type(first_file.name)
+            # Use the file's content_type if available, otherwise guess from name
+            mime_type = first_file.content_type if hasattr(first_file, 'content_type') else None
+            if not mime_type:
+                mime_type, _ = mimetypes.guess_type(first_file.name)
+            
             if mime_type:
                 if mime_type.startswith('image/'):
                     data['message_type'] = 'image'
@@ -1040,7 +1086,11 @@ class MessageCreateView(generics.CreateAPIView):
                 else:
                     data['message_type'] = 'file'
             else:
-                data['message_type'] = 'file'
+                # Fallback to audio if filename contains audio-related terms
+                if any(keyword in first_file.name.lower() for keyword in ['audio', 'voice', 'sound', 'webm', 'mp3', 'wav', 'ogg']):
+                    data['message_type'] = 'audio'
+                else:
+                    data['message_type'] = 'file'
         
         # Create message first
         serializer = self.get_serializer(data=data)
@@ -1055,9 +1105,20 @@ class MessageCreateView(generics.CreateAPIView):
                 return Response({"error": f"File {file.name} exceeds 50MB limit"}, 
                               status=status.HTTP_400_BAD_REQUEST)
             
+            mime_type = getattr(file, 'content_type', None)
+            if not mime_type or mime_type == 'application/octet-stream':
+                ext = os.path.splitext(file.name)[1].lower() if file.name else ''
+                if ext == '.webm':
+                    mime_type = 'audio/webm'
+                else:
+                    mime_type, _ = mimetypes.guess_type(file.name) if file.name else (None, None)
+
             media = MessageMedia.objects.create(
                 message=message,
-                file=file
+                file=file,
+                file_name=getattr(file, 'name', None),
+                file_size=getattr(file, 'size', None),
+                mime_type=mime_type
             )
             media_objects.append(media)
         
@@ -1837,3 +1898,65 @@ class HealthCheckView(APIView):
             'disk': disk_status,
             'version': '1.0.0'
         })
+
+
+class ContactViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing user contacts"""
+    permission_classes = [IsAuthenticated]
+    serializer_class = ContactSerializer
+    
+    def get_queryset(self):
+        return Contact.objects.filter(user=self.request.user).select_related('contact').distinct()
+    
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
+    def create(self, request, *args, **kwargs):
+        serializer = AddContactSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        contact_id = serializer.validated_data['contact_id']
+        
+        # Prevent adding self as contact
+        if contact_id == request.user.id:
+            return Response(
+                {'error': 'Cannot add yourself as a contact'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if contact already exists
+        if Contact.objects.filter(user=request.user, contact_id=contact_id).exists():
+            return Response(
+                {'error': 'Contact already exists'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create mutual contact relationship
+        # Create contact for current user (request.user adds contact_id)
+        contact = Contact.objects.create(user=request.user, contact_id=contact_id)
+        
+        # Create reverse contact for the other user (contact_id adds request.user)
+        Contact.objects.get_or_create(user_id=contact_id, contact_id=request.user.id)
+        
+        serializer = ContactSerializer(contact, context={'request': request})
+        
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    def destroy(self, request, *args, **kwargs):
+        contact_id = kwargs.get('pk')
+        
+        try:
+            contact = Contact.objects.get(user=request.user, contact_id=contact_id)
+            contact.delete()
+            
+            # Also remove the reverse contact relationship
+            Contact.objects.filter(user_id=contact_id, contact_id=request.user.id).delete()
+            
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Contact.DoesNotExist:
+            return Response(
+                {'error': 'Contact not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )

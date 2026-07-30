@@ -9,7 +9,7 @@ import { useMessages } from '@/hooks/useMessage';
 import { MessageBubble } from './message-bubble';
 import { MessageInput } from './message-input';
 import { ChatHeader } from './chat-header';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Loader2 } from 'lucide-react';
 
 interface ChatWindowProps {
   chatId?: number;
@@ -77,67 +77,60 @@ export function ChatWindow({ chatId, onBack }: ChatWindowProps) {
     );
   }
 
-  if (!currentChat && !isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-        <div className="h-16 w-16 bg-destructive/10 rounded-full flex items-center justify-center mb-4">
-          <MessageSquare className="h-8 w-8 text-destructive" />
-        </div>
-        <h3 className="text-xl font-semibold mb-2">Chat Not Found</h3>
-        <p className="text-muted-foreground">The selected chat could not be found</p>
-      </div>
-    );
-  }
-
-  if (isLoading && messages.length === 0) {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="p-4 border-b"><div className="h-10 w-10 bg-muted animate-pulse rounded-full" /></div>
-        <div className="flex-1 p-4 space-y-4">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-              <div className="max-w-[70%]"><div className="h-16 bg-muted animate-pulse rounded-lg" /></div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col h-full">
-      {currentChat && <ChatHeader chat={currentChat} onBack={onBack} />}
+      {currentChat ? (
+        <ChatHeader chat={currentChat} onBack={onBack} />
+      ) : (
+        <div className="p-4 border-b">
+          <div className="h-10 w-10 bg-muted animate-pulse rounded-full flex items-center justify-center">
+            <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />
+          </div>
+        </div>
+      )}
 
       <ScrollArea ref={scrollAreaRef} className="flex-1 p-4" onScroll={handleScroll} onScrollCapture={handleScrollToTop}>
-        {hasMoreMessages && (
-          <div className="flex justify-center mb-4">
-            <Button variant="outline" size="sm" onClick={loadMoreMessages} disabled={isLoading}>
-              {isLoading ? 'Loading...' : 'Load older messages'}
-            </Button>
-          </div>
-        )}
-
-        <div className="space-y-4">
-          {messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              chatType={currentChat!.chat_type}
-              isSelected={selectedMessage?.id === message.id}
-            />
-          ))}
-        </div>
-
-        {typingUsers.size > 0 && (
-          <div className="flex items-center space-x-2 mt-4">
-            <div className="bg-muted rounded-lg p-3">
-              <div className="flex space-x-1">
-                <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" />
-                <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+        {isLoading && messages.length === 0 ? (
+          <div className="space-y-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
+                <div className="max-w-[70%]"><div className="h-16 bg-muted animate-pulse rounded-lg" /></div>
               </div>
-            </div>
+            ))}
           </div>
+        ) : (
+          <>
+            {hasMoreMessages && (
+              <div className="flex justify-center mb-4">
+                <Button variant="outline" size="sm" onClick={loadMoreMessages} disabled={isLoading}>
+                  {isLoading ? 'Loading...' : 'Load older messages'}
+                </Button>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {messages.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  chatType={currentChat?.chat_type || 'private'}
+                  isSelected={selectedMessage?.id === message.id}
+                />
+              ))}
+            </div>
+
+            {typingUsers.size > 0 && (
+              <div className="flex items-center space-x-2 mt-4">
+                <div className="bg-muted rounded-lg p-3">
+                  <div className="flex space-x-1">
+                    <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" />
+                    <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                    <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         <div ref={messagesEndRef} />

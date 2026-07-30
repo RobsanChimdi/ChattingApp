@@ -96,6 +96,22 @@ class User(AbstractUser):
         self.save(update_fields=['is_online', 'last_seen'])
 
 
+class Contact(models.Model):
+    """Model for user contacts/friends"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='contacts')
+    contact = models.ForeignKey(User, on_delete=models.CASCADE, related_name='contact_of')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ['user', 'contact']
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username} -> {self.contact.username}"
+
+
 class Chat(models.Model):
     CHAT_TYPES = (
         ("private", "Private"),
@@ -132,8 +148,6 @@ class Chat(models.Model):
     def clean(self):
         """Validate chat constraints"""
         if self.chat_type == "private":
-            if self.pk and self.participants.count() != 2:
-                raise ValidationError("Private chats must have exactly 2 participants")
             if self.name:
                 raise ValidationError("Private chats should not have a name")
         elif self.chat_type == "group":
@@ -321,7 +335,7 @@ class Message(models.Model):
 class MessageMedia(models.Model):
     VALID_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
     VALID_VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv']
-    VALID_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a', '.flac']
+    VALID_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm', '.aac', '.opus', '.mp4']
     VALID_DOCUMENT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt', '.xlsx', '.pptx']
     
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="media")
@@ -360,8 +374,6 @@ class MessageMedia(models.Model):
     
     def save(self, *args, **kwargs):
         """Populate file metadata before saving"""
-        self.full_clean()
-        
         if not self.file_name and self.file:
             self.file_name = os.path.basename(self.file.name)
         
@@ -370,7 +382,26 @@ class MessageMedia(models.Model):
                 self.file_size = self.file.size
             except (OSError, FileNotFoundError):
                 pass
-        
+
+        if not self.mime_type and self.file:
+            import mimetypes
+            ext = os.path.splitext(self.file.name)[1].lower()
+            if ext == '.webm':
+                self.mime_type = 'audio/webm'
+            elif ext in ['.mp3']:
+                self.mime_type = 'audio/mpeg'
+            elif ext in ['.wav']:
+                self.mime_type = 'audio/wav'
+            elif ext in ['.ogg', '.opus']:
+                self.mime_type = 'audio/ogg'
+            elif ext in ['.m4a', '.aac']:
+                self.mime_type = 'audio/mp4'
+            else:
+                guessed_type, _ = mimetypes.guess_type(self.file.name)
+                if guessed_type:
+                    self.mime_type = guessed_type
+
+        self.full_clean()
         super().save(*args, **kwargs)
     
     @property

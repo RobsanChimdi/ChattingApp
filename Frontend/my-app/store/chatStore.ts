@@ -104,6 +104,9 @@ export const useChatStore = create<ChatStore>()(
       
       // ========== CHAT ACTIONS ==========
       fetchChats: async () => {
+        const state = get();
+        if (state.isLoading) return;
+        
         set({ isLoading: true, error: null });
         
         try {
@@ -209,10 +212,22 @@ export const useChatStore = create<ChatStore>()(
           const response = await chatService.getMessages(chatId, page);
           const currentMessages = get().messages.get(chatId) || [];
           
+          // Deduplicate messages by ID
+          const messageMap = new Map<number, Message>();
+          [...currentMessages, ...response.results].forEach(msg => {
+            messageMap.set(msg.id, msg);
+          });
+          const uniqueMessages = Array.from(messageMap.values());
+          
+          // Sort messages by created_at in ascending order (oldest first)
+          uniqueMessages.sort((a, b) => 
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+          
           set((state) => ({
             messages: new Map(state.messages).set(
               chatId,
-              [...currentMessages, ...response.results]
+              uniqueMessages
             ),
             isLoading: false,
           }));
@@ -234,6 +249,7 @@ export const useChatStore = create<ChatStore>()(
             ...data,
           });
           
+          // Add message immediately for current user
           get().addMessage(chatId, message);
           set({ isSending: false });
           return message;
@@ -297,10 +313,18 @@ export const useChatStore = create<ChatStore>()(
       addMessage: (chatId, message) => {
         set((state) => {
           const chatMessages = state.messages.get(chatId) || [];
+          // Check if message already exists to prevent duplicates
+          if (chatMessages.some(msg => msg.id === message.id)) {
+            return state;
+          }
+          // Add message and sort by created_at
+          const updatedMessages = [...chatMessages, message].sort((a, b) => 
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
           return {
             messages: new Map(state.messages).set(
               chatId,
-              [message, ...chatMessages]
+              updatedMessages
             ),
           };
         });
@@ -469,7 +493,7 @@ export const useChatStore = create<ChatStore>()(
             return { unreadCounts: newCounts };
           });
         } catch (error) {
-          console.error('Failed to fetch unread counts:', error);
+          // Silently fail on unread counts to avoid spamming errors
         }
       },
       

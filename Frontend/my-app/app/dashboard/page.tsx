@@ -106,16 +106,16 @@ export default function DashboardPage() {
       // Fetch real calls data
       const callsData = await callService.getUserCalls();
       const processedCalls: RecentCall[] = callsData.slice(0, 5).map((call: any) => {
-        const otherParticipant = call.participants?.find((p: any) => p.user.id !== user?.id);
+        const otherParticipant = call.participants?.find((p: any) => p.user?.id !== user?.id);
         const isInitiator = call.initiated_by === user?.id;
         const isMissed = call.status === 'missed' || call.status === 'rejected';
         
         return {
           id: call.id.toString(),
           with: {
-            id: otherParticipant?.user.id?.toString() || 'unknown',
-            name: otherParticipant?.user.username || 'Unknown',
-            avatar: otherParticipant?.user.profile_image
+            id: otherParticipant?.user?.id?.toString() || 'unknown',
+            name: otherParticipant?.user?.username || 'Unknown',
+            avatar: otherParticipant?.user?.profile_image
           },
           type: call.call_type,
           direction: isMissed && !isInitiator ? 'missed' : (isInitiator ? 'outgoing' : 'incoming'),
@@ -235,7 +235,7 @@ export default function DashboardPage() {
             <div className="space-y-4">
               <Button
                 size="lg"
-                onClick={() => router.push(`/call/${activeCall.id}`)}
+                onClick={() => router.push(`/dashboard/call/${activeCall.id}`)}
                 className="w-full"
               >
                 <Phone className="h-4 w-4 mr-2" />
@@ -244,7 +244,7 @@ export default function DashboardPage() {
 
               <Button
                 variant="outline"
-                onClick={() => router.push('/chat')}
+                onClick={() => router.push('/dashboard/chat')}
                 className="w-full"
               >
                 Go to Chats

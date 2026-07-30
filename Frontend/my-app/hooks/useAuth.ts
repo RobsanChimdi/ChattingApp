@@ -93,28 +93,8 @@ export const useAuth = (): UseAuthReturn => {
       // Prevent multiple connection attempts
       if (isConnecting) return;
       
-      // Only connect if:
-      // 1. User is authenticated
-      // 2. Email is verified  
-      // 3. Socket is not already connected
-      // 4. Not manually disconnected
-      // 5. Page is visible (prevents background connections)
-      if (isAuthenticated && isEmailVerified && !socketService.isConnected() && document.visibilityState === 'visible') {
-        isConnecting = true;
-        try {
-          await getWebSocketToken();
-          await socketService.connect();
-        } catch (error) {
-          console.error('Failed to connect socket:', error);
-          if (isMounted) {
-            setError('Connection error. Please refresh the page.');
-          }
-        } finally {
-          isConnecting = false;
-        }
-      }
-      
-      // Disconnect if not authenticated
+      // WebSocket server is disabled, skip connection attempts
+      // Only disconnect if not authenticated
       if (!isAuthenticated && socketService.isConnected()) {
         socketService.disconnect();
       }
@@ -133,65 +113,20 @@ export const useAuth = (): UseAuthReturn => {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && isAuthenticated && isEmailVerified && !socketService.isConnected()) {
-        console.log('Tab became visible, reconnecting socket...');
-        getWebSocketToken()
-          .then(() => socketService.connect())
-          .catch(error => console.error('Failed to reconnect socket:', error));
+        // WebSocket server is disabled, skip reconnection attempts
+        console.log('Tab became visible, skipping socket reconnection (server disabled)');
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isAuthenticated, isEmailVerified, getWebSocketToken]);
+  }, [isAuthenticated, isEmailVerified]);
 
-  // Auto-update last seen when user is active (only if verified)
+  // Auto-update last seen when user is active (only if verified) - DISABLED to prevent infinite status exchange
   useEffect(() => {
-    if (!isAuthenticated || !isEmailVerified) return;
-
-    let lastActivity = Date.now();
-    let activityTimer: NodeJS.Timeout;
-    let updateTimer: NodeJS.Timeout;
-    
-    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-
-    const updateLastSeen = () => {
-      const now = Date.now();
-      if (now - lastActivity >= 30000) {
-        updateLastSeenAction().catch(console.error);
-        lastActivity = now;
-      }
-    };
-
-    const handleActivity = () => {
-      clearTimeout(activityTimer);
-      activityTimer = setTimeout(updateLastSeen, 1000);
-    };
-
-    const startPeriodicUpdate = () => {
-      updateTimer = setInterval(() => {
-        updateLastSeenAction().catch(console.error);
-      }, 60000);
-    };
-
-    activityEvents.forEach((event) => {
-      window.addEventListener(event, handleActivity);
-    });
-
-    updateLastSeenAction().catch(console.error);
-    startPeriodicUpdate();
-
-    return () => {
-      clearTimeout(activityTimer);
-      clearInterval(updateTimer);
-      activityEvents.forEach((event) => {
-        window.removeEventListener(event, handleActivity);
-      });
-
-      if (isAuthenticated && isEmailVerified) {
-        setOfflineAction().catch(console.error);
-      }
-    };
-  }, [isAuthenticated, isEmailVerified, updateLastSeenAction, setOfflineAction]);
+    // Status updates disabled to prevent infinite offline/online toggling
+    return () => {};
+  }, [isAuthenticated, isEmailVerified]);
 
   const login = useCallback(
     async (credentials: { username: string; password: string }): Promise<void> => {

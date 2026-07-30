@@ -11,6 +11,8 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Check, CheckCheck, Clock, Download, File, MoreVertical, Reply, Copy, Forward, Edit, Trash2 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { AudioWaveform } from './audio-waveform';
+import { getMediaUrl, isAudioMedia } from '@/utils/helpers';
 import type { Message } from '@/types';
 import type { ChatType } from '@/types/chat.types';
 
@@ -65,13 +67,9 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
     }
   };
 
-  const getMediaUrl = (media: any) => {
-    // Handle both 'url' and 'file_url' field names
-    return media.url || media.file_url || '';
-  };
-
   const getThumbnailUrl = (media: any) => {
-    return media.thumbnail_url || media.thumbnail || '';
+    const rawUrl = media.thumbnail_url || media.thumbnail || '';
+    return getMediaUrl(rawUrl);
   };
 
   const renderMedia = () => {
@@ -79,8 +77,18 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
     return message.media.map((media) => {
       const mediaUrl = getMediaUrl(media);
       const thumbnailUrl = getThumbnailUrl(media);
-      
-      if (media.mime_type?.startsWith('image/')) {
+
+      // Detect audio by message_type OR mime_type OR file_type OR extension
+      if (isAudioMedia(media, message.message_type)) {
+        return (
+          <AudioWaveform
+            key={media.id}
+            media={media}
+            messageType={message.message_type}
+            isOwnMessage={isOwnMessage}
+          />
+        );
+      } else if (media.mime_type?.startsWith('image/')) {
         return (
           <div key={media.id} className="relative group">
             <img 
@@ -175,7 +183,11 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
 
         <div className="relative">
           <div className={cn(
-            "px-4 py-2 rounded-lg", 
+            "rounded-2xl",
+            // Audio-only messages get minimal padding so the player fills the bubble
+            message.message_type === 'audio' && hasMedia && !message.text
+              ? 'p-0 overflow-hidden'
+              : 'px-4 py-2',
             isOwnMessage ? "bg-primary text-primary-foreground" : "bg-muted", 
             isSelected && "ring-2 ring-primary"
           )}>
@@ -226,7 +238,7 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
 
           {(isHovered || isSelected) && !isEditing && (
             <div className={cn(
-              "absolute flex items-center space-x-1 -top-2", 
+              "absolute flex items-center space-x-1 -top-2 z-10", 
               isOwnMessage ? "right-2" : "left-2"
             )}>
               <DropdownMenu>
@@ -235,7 +247,7 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
                     <MoreVertical className="h-3 w-3" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align={isOwnMessage ? "end" : "start"}>
+                <DropdownMenuContent align={isOwnMessage ? "end" : "start"} className="z-50">
                   <DropdownMenuItem onClick={() => setReplyTo(message)}>
                     <Reply className="h-4 w-4 mr-2" />Reply
                   </DropdownMenuItem>

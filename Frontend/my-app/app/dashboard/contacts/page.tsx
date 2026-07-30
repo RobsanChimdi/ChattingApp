@@ -2,41 +2,24 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
-import { api } from '@/services/api';
+import { useContacts } from '@/hooks/useContacts';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { ContactCard } from '@/components/contacts/contact-card';
 import {
   Users,
   Search,
   Plus,
-  MessageSquare,
-  Phone,
-  Video,
-  Loader2,
-  Radio
+  Loader2
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-
-interface Contact {
-  id: number;
-  username: string;
-  email: string;
-  first_name?: string;
-  last_name?: string;
-  profile_image?: string;
-  bio?: string;
-  is_online: boolean;
-  last_seen?: string;
-}
+import type { Contact } from '@/types/contacts.types';
+import { api } from '@/services/api';
 
 export default function ContactsPage() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { getContacts } = useContacts();
   
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -51,10 +34,8 @@ export default function ContactsPage() {
   const loadContacts = async () => {
     setIsLoading(true);
     try {
-      const response = await api.get<any[]>('/contacts/');
-      // Extract contact user data from the response
-      const contactUsers = response.map((contact: any) => contact.contact_user);
-      setContacts(contactUsers);
+      const loadedContacts = await getContacts();
+      setContacts(loadedContacts);
     } catch (error) {
       console.error('Failed to load contacts:', error);
     } finally {
@@ -90,6 +71,28 @@ export default function ContactsPage() {
       return `${contact.first_name} ${contact.last_name}`;
     }
     return contact.username;
+  };
+
+  const handleMessage = async (contact: Contact) => {
+    try {
+      const response = await api.post<any>('/chats/private/create/', {
+        participant_id: contact.id
+      });
+      router.push(`/dashboard/chat/${response.id}`);
+    } catch (error) {
+      console.error('Failed to create/get chat:', error);
+    }
+  };
+
+  const handleCall = async (contact: Contact, type: 'audio' | 'video') => {
+    try {
+      const response = await api.post<any>('/chats/private/create/', {
+        participant_id: contact.id
+      });
+      router.push(`/dashboard/call/setup?chat=${response.id}&type=${type}`);
+    } catch (error) {
+      console.error('Failed to create/get chat for call:', error);
+    }
   };
 
   if (authLoading || isLoading) {
@@ -138,56 +141,14 @@ export default function ContactsPage() {
           filteredContacts
             .filter((contact) => contact.id !== user?.id)
             .map((contact) => (
-              <Card key={contact.id} className="p-4 hover:bg-muted/50 transition-colors">
-                <div className="flex items-center space-x-4">
-                  <div className="relative">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={contact.profile_image || undefined} />
-                      <AvatarFallback>
-                        {getDisplayName(contact).charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    {contact.is_online && (
-                      <div className="absolute bottom-0 right-0 h-3 w-3 bg-green-500 rounded-full border-2 border-background" />
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium truncate">
-                        {getDisplayName(contact)}
-                      </p>
-                      <div className="flex items-center space-x-1">
-                        {contact.is_online ? (
-                          <Badge variant="outline" className="text-green-500 border-green-500/20 bg-green-500/10">
-                            <Radio className="h-3 w-3 mr-1 animate-pulse" />
-                            Online
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {formatLastSeen(contact.last_seen)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-sm text-muted-foreground truncate mt-1">
-                      {contact.bio || contact.email}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Button variant="outline" size="icon" className="h-8 w-8" title="Message">
-                      <MessageSquare className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="icon" className="h-8 w-8" title="Audio Call">
-                      <Phone className="h-4 w-4" />
-                    </Button>
-                    <Button variant="outline" size="icon" className="h-8 w-8" title="Video Call">
-                      <Video className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
+              <ContactCard
+                key={contact.id}
+                contact={contact}
+                onMessage={handleMessage}
+                onCall={handleCall}
+                getDisplayName={getDisplayName}
+                formatLastSeen={formatLastSeen}
+              />
             ))
         ) : (
           <div className="text-center py-12">

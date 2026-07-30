@@ -553,9 +553,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       
 
       updateLastSeen: async () => {
-
         try {
-
           await authService.updateLastSeen();
           
           // Update local user state to reflect online status
@@ -563,37 +561,24 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           if (currentUser) {
             set({ user: { ...currentUser, is_online: true } });
           }
-
         } catch (error) {
-
-          console.error('Failed to update last seen:', error);
-
+          // Silently fail - this is a non-critical background operation
         }
-
       },
 
       
 
       setOffline: async () => {
-
         try {
-
           await authService.setOffline();
 
           const currentUser = get().user;
-
           if (currentUser) {
-
             set({ user: { ...currentUser, is_online: false } });
-
           }
-
         } catch (error) {
-
-          console.error('Failed to set offline:', error);
-
+          // Silently fail - this is a non-critical background operation
         }
-
       },
 
       

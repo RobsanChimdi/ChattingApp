@@ -141,13 +141,13 @@ export default function CallSetupPage() {
 
   const handleStartCall = async () => {
     if (!chatId) {
-      router.push('/chat');
+      router.push('/dashboard/chat');
       return;
     }
 
     try {
       const call = await initiateCall(parseInt(chatId, 10), callType);
-      router.push(`/call/${call.id}`);
+      router.push(`/dashboard/call/${call.id}`);
     } catch (error) {
       console.error('Failed to start call:', error);
     }

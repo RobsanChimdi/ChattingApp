@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 import os
 import mimetypes
 from django.contrib.auth.password_validation import validate_password
-from .models import User, Chat, Message, MessageMedia, MessageStatus, MessageReaction, Call, CallParticipant, CallQuality
+from .models import User, Chat, Message, MessageMedia, MessageStatus, MessageReaction, Call, CallParticipant, CallQuality, Contact
 
 
 # ========== USER SERIALIZERS ==========
@@ -59,7 +59,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["last_seen", "is_online", "is_verified", "email"]
         extra_kwargs = {
-            'profile_image': {'write_only': True, 'required': False, 'allow_null': True}
+            'profile_image': {'required': False, 'allow_null': True}
         }
     
     def get_profile_image_url(self, obj):
@@ -162,6 +162,13 @@ class MessageMediaSerializer(serializers.ModelSerializer):
                 return 'audio'
             else:
                 return 'document'
+        ext = os.path.splitext(obj.file.name)[1].lower() if obj.file else ''
+        if ext in MessageMedia.VALID_AUDIO_EXTENSIONS:
+            return 'audio'
+        elif ext in MessageMedia.VALID_IMAGE_EXTENSIONS:
+            return 'image'
+        elif ext in MessageMedia.VALID_VIDEO_EXTENSIONS:
+            return 'video'
         return 'unknown'
     
     def validate_file(self, value):
@@ -176,8 +183,12 @@ class MessageMediaSerializer(serializers.ModelSerializer):
         mime_type, _ = mimetypes.guess_type(value.name)
         
         # Define valid extensions (lowercase for comparison)
-        valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', 
-                           '.mp3', '.wav', '.pdf', '.doc', '.docx', '.txt')
+        valid_extensions = (
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
+            '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv',
+            '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm', '.aac', '.opus',
+            '.pdf', '.doc', '.docx', '.txt', '.xlsx', '.pptx'
+        )
         
         ext = os.path.splitext(value.name)[1].lower()
         if ext not in valid_extensions:
@@ -205,11 +216,19 @@ class MessageStatusSerializer(serializers.ModelSerializer):
         }
     
     def get_user_info(self, obj):
+        profile_image_url = None
+        if obj.user.profile_image:
+            request = self.context.get('request')
+            if request:
+                profile_image_url = request.build_absolute_uri(obj.user.profile_image.url)
+            else:
+                profile_image_url = obj.user.profile_image.url
+        
         return {
             'id': obj.user.id,
             'username': obj.user.username,
             'display_name': obj.user.get_display_name(),
-            'profile_image': obj.user.profile_image.url if obj.user.profile_image else None
+            'profile_image': profile_image_url
         }
     
     def validate(self, data):
@@ -254,11 +273,19 @@ class MessageReactionSerializer(serializers.ModelSerializer):
         }
     
     def get_user_info(self, obj):
+        profile_image_url = None
+        if obj.user.profile_image:
+            request = self.context.get('request')
+            if request:
+                profile_image_url = request.build_absolute_uri(obj.user.profile_image.url)
+            else:
+                profile_image_url = obj.user.profile_image.url
+        
         return {
             'id': obj.user.id,
             'username': obj.user.username,
             'display_name': obj.user.get_display_name(),
-            'profile_image': obj.user.profile_image.url if obj.user.profile_image else None
+            'profile_image': profile_image_url
         }
     
     def validate(self, data):
@@ -304,11 +331,19 @@ class MessageSummarySerializer(serializers.ModelSerializer):
         ]
     
     def get_sender_info(self, obj):
+        profile_image_url = None
+        if obj.sender.profile_image:
+            request = self.context.get('request')
+            if request:
+                profile_image_url = request.build_absolute_uri(obj.sender.profile_image.url)
+            else:
+                profile_image_url = obj.sender.profile_image.url
+        
         return {
             'id': obj.sender.id,
             'username': obj.sender.username,
             'display_name': obj.sender.get_display_name(),
-            'profile_image': obj.sender.profile_image.url if obj.sender.profile_image else None
+            'profile_image': profile_image_url
         }
     
     def get_reply_to_info(self, obj):
@@ -373,10 +408,32 @@ class MessageSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             'client_message_id': {'required': False},
-            'sender': {'write_only': True},
+            'sender': {'required': False, 'write_only': True},
             'chat': {'required': True},
-            'reply_to': {'required': False, 'allow_null': True}
+            'reply_to': {'required': False, 'allow_null': True},
+            'message_type': {'required': True},
+            'text': {'required': False, 'allow_blank': True}
         }
+    
+    def validate(self, data):
+        message_type = data.get('message_type')
+        text = data.get('text', '')
+        
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Message validation - message_type: {message_type}, text: '{text}', data keys: {list(data.keys())}")
+        
+        # For text messages, text content is required
+        # For other message types (audio, image, video, file), text is optional
+        if message_type == 'text' and not text.strip():
+            raise serializers.ValidationError({"text": "Text content is required for text messages"})
+        
+        # For non-text messages, if no text is provided, ensure it's empty string not None
+        if message_type != 'text' and not text:
+            data['text'] = ''
+        
+        return data
     
     def get_sender_info(self, obj):
         return {
@@ -406,6 +463,22 @@ class MessageSerializer(serializers.ModelSerializer):
                 'location_name': obj.location_name
             }
         return None
+    
+    def get_sender_info(self, obj):
+        profile_image_url = None
+        if obj.sender.profile_image:
+            request = self.context.get('request')
+            if request:
+                profile_image_url = request.build_absolute_uri(obj.sender.profile_image.url)
+            else:
+                profile_image_url = obj.sender.profile_image.url
+        
+        return {
+            'id': obj.sender.id,
+            'username': obj.sender.username,
+            'display_name': obj.sender.get_display_name(),
+            'profile_image': profile_image_url
+        }
     
     def get_status_summary(self, obj):
         return obj.status_summary
@@ -528,14 +601,25 @@ class ChatListSerializer(serializers.ModelSerializer):
     
     def get_participants_info(self, obj):
         participants = obj.participants.all()
-        return [{
-            'id': user.id,
-            'username': user.username,
-            'display_name': user.get_display_name(),
-            'profile_image': user.profile_image.url if user.profile_image else None,
-            'is_online': user.is_online,
-            'last_seen': user.last_seen
-        } for user in participants]
+        result = []
+        for user in participants:
+            profile_image_url = None
+            if user.profile_image:
+                request = self.context.get('request')
+                if request:
+                    profile_image_url = request.build_absolute_uri(user.profile_image.url)
+                else:
+                    profile_image_url = user.profile_image.url
+            
+            result.append({
+                'id': user.id,
+                'username': user.username,
+                'display_name': user.get_display_name(),
+                'profile_image': profile_image_url,
+                'is_online': user.is_online,
+                'last_seen': user.last_seen
+            })
+        return result
 
 
 class ChatSerializer(serializers.ModelSerializer):
@@ -926,3 +1010,33 @@ class CallJoinSerializer(serializers.Serializer):
             raise serializers.ValidationError("User does not exist.")
         
         return user
+
+
+# ========== CONTACT SERIALIZERS ==========
+class ContactSerializer(serializers.ModelSerializer):
+    """Serializer for Contact model"""
+    contact_user = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Contact
+        fields = ['id', 'user', 'contact', 'contact_user', 'created_at']
+        read_only_fields = ['id', 'created_at']
+    
+    def get_contact_user(self, obj):
+        """Get detailed user information for the contact"""
+        # obj.contact is the user being added as a contact
+        # This should return the information of the person who was added
+        return UserProfileSerializer(obj.contact, context=self.context).data
+
+
+class AddContactSerializer(serializers.Serializer):
+    """Serializer for adding a contact"""
+    contact_id = serializers.IntegerField(required=True)
+    
+    def validate_contact_id(self, value):
+        try:
+            contact = User.objects.get(id=value, is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User does not exist.")
+        
+        return value

@@ -39,10 +39,8 @@ export default function ChatsPage() {
   useEffect(() => {
     if (searchQuery) {
       const filtered = chats.filter((chat: any) =>
-        chat.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        chat.participants?.some((p: any) => 
-          p.user.username?.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+        chat.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        chat.name?.toLowerCase().includes(searchQuery.toLowerCase())
       );
       setFilteredChats(filtered);
     } else {
@@ -119,16 +117,16 @@ export default function ChatsPage() {
               <Card className="p-4 hover:bg-muted/50 transition-colors cursor-pointer">
                 <div className="flex items-center space-x-4">
                   <Avatar className="h-12 w-12">
-                    <AvatarImage src={chat.avatar || chat.participants?.[0]?.user?.profile_image} />
+                    <AvatarImage src={chat.display_image || chat.image} />
                     <AvatarFallback>
-                      {chat.name?.charAt(0).toUpperCase() || chat.participants?.[0]?.user?.username?.charAt(0).toUpperCase()}
+                      {chat.display_name?.charAt(0).toUpperCase() || chat.name?.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <p className="font-medium truncate">
-                        {chat.name || chat.participants?.map((p: any) => p.user.username).join(', ') || 'Unknown'}
+                        {chat.display_name || chat.name}
                       </p>
                       {chat.last_message?.created_at && (
                         <span className="text-xs text-muted-foreground">
@@ -137,7 +135,7 @@ export default function ChatsPage() {
                       )}
                     </div>
                     <p className="text-sm text-muted-foreground truncate mt-1">
-                      {chat.last_message?.text || chat.last_message?.content || 'No messages yet'}
+                      {chat.last_message?.text || chat.last_message?.content}
                     </p>
                   </div>
 

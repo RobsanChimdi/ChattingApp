@@ -1,30 +1,22 @@
-// app/chat/page.tsx
+// app/chat/[chatId]/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useChat } from '@/hooks/useChat';
-import { useSocket } from '@/hooks/useSocket';
 import { ChatWindow } from '@/components/chat/chat-window';
-import { ChatList } from '@/components/chat/chat-list';
 import { Button } from '@/components/ui/button';
-import { Menu, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import type { ChatListItem } from '@/types';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 
-export default function ChatPage() {
+export default function ChatDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
-  const { isConnected } = useSocket();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const chatIdParam = params.chatId as string;
   const chatIdNumber = chatIdParam ? parseInt(chatIdParam, 10) : undefined;
   
-  const { chats, currentChat, setCurrentChat, fetchChats } = useChat(chatIdNumber);
-  
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const { currentChat, setCurrentChat, fetchChats, chats } = useChat(chatIdNumber);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -33,28 +25,21 @@ export default function ChatPage() {
   }, [isAuthenticated, authLoading, router]);
 
   useEffect(() => {
-    if (isAuthenticated && !isInitialized) {
-      fetchChats().then(() => setIsInitialized(true));
+    if (isAuthenticated && chats.length === 0) {
+      fetchChats().catch(console.error);
     }
-  }, [isAuthenticated, fetchChats, isInitialized]);
-
-  const handleChatSelect = (chat: ChatListItem) => {
-    setCurrentChat(chat);
-    router.push(`/chat/${chat.id}`);
-    setIsMobileMenuOpen(false);
-  };
+  }, [isAuthenticated, fetchChats, chats.length]);
 
   const handleBack = () => {
     setCurrentChat(null);
-    router.push('/chat');
-    setIsMobileMenuOpen(false);
+    router.push('/dashboard/chat');
   };
 
   if (authLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto" />
+          <Loader2 className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto" />
           <p className="mt-4 text-muted-foreground">Loading...</p>
         </div>
       </div>
@@ -63,38 +48,25 @@ export default function ChatPage() {
 
   if (!isAuthenticated) return null;
 
+  if (!chatIdNumber) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground">Invalid chat ID</p>
+          <Button onClick={handleBack} className="mt-4">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Chats
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-background">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="fixed top-4 left-4 z-50 md:hidden"
-        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-      >
-        {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-      </Button>
-
-      <div
-        className={cn(
-          "fixed inset-y-0 left-0 z-40 w-80 transform border-r bg-background transition-transform duration-200 ease-in-out md:relative md:translate-x-0",
-          isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-        )}
-      >
-        <ChatList onChatSelect={handleChatSelect} selectedChatId={chatIdParam} />
-      </div>
-
       <div className="flex-1">
-        {!isConnected && chatIdParam && (
-          <div className="bg-yellow-100 dark:bg-yellow-900/20 p-2 text-center text-sm">
-            <p className="text-yellow-800 dark:text-yellow-200">Reconnecting to chat server...</p>
-          </div>
-        )}
         <ChatWindow chatId={chatIdNumber} onBack={handleBack} />
       </div>
-
-      {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={() => setIsMobileMenuOpen(false)} />
-      )}
     </div>
   );
 }

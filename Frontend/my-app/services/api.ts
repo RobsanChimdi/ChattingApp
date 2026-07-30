@@ -116,18 +116,28 @@ class ApiClient {
 
   // Upload file - returns the data directly
   async upload<T>(url: string, formData: FormData, onProgress?: (progress: number) => void): Promise<T> {
-    const response = await this.client.post<T>(url, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          onProgress(percentCompleted);
-        }
-      },
-    });
-    return response.data;
+    try {
+      const response = await this.client.post<T>(url, formData, {
+        // Don't set Content-Type header - Axios will set it automatically with boundary
+        onUploadProgress: (progressEvent) => {
+          if (onProgress && progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(percentCompleted);
+          }
+        },
+      });
+      return response.data;
+    } catch (error: any) {
+      // Enhanced error logging
+      console.error('Upload error details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        headers: error.response?.headers,
+        config: error.config
+      });
+      throw error;
+    }
   }
 }
 

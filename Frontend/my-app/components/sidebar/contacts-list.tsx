@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,16 +14,18 @@ import {
   Circle
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { api } from '@/services/api';
 import { cn } from '@/lib/utils';
 
 interface Contact {
   id: number;
   username: string;
   email: string;
+  first_name?: string;
+  last_name?: string;
   profile_image?: string;
-  status: 'online' | 'away' | 'busy' | 'offline';
+  is_online: boolean;
   last_seen?: string;
-  is_favorite?: boolean;
 }
 
 interface ContactsListProps {
@@ -36,54 +39,60 @@ export function ContactsList({
   limit = 20,
   showActions = true 
 }: ContactsListProps) {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    // Simulate loading contacts
-    const timer = setTimeout(() => {
-      const mockContacts: Contact[] = Array.from({ length: 15 }, (_, i) => ({
-        id: i + 1,
-        username: `User ${i + 1}`,
-        email: `user${i + 1}@example.com`,
-        status: i % 4 === 0 ? 'online' : 
-                i % 4 === 1 ? 'away' : 
-                i % 4 === 2 ? 'busy' : 'offline',
-        is_favorite: i < 3,
-        last_seen: new Date(Date.now() - Math.random() * 86400000).toISOString()
-      }));
-      setContacts(mockContacts);
+    if (isAuthenticated) {
+      loadContacts();
+    }
+  }, [isAuthenticated]);
+
+  const loadContacts = async () => {
+    setIsLoading(true);
+    try {
+      const response = await api.get<any[]>('/contacts/');
+      // Extract contact user data from the response
+      const contactUsers = response.map((contact: any) => contact.contact_user);
+      // Remove duplicates based on contact ID
+      const uniqueContacts = contactUsers.filter((contact: any, index: number, self: any[]) =>
+        index === self.findIndex((c: any) => c.id === contact.id)
+      );
+      setContacts(uniqueContacts);
+    } catch (error) {
+      console.error('Failed to load contacts:', error);
+    } finally {
       setIsLoading(false);
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'online': return 'bg-green-500';
-      case 'away': return 'bg-yellow-500';
-      case 'busy': return 'bg-red-500';
-      case 'offline': return 'bg-gray-500';
-      default: return 'bg-gray-500';
     }
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'online': return 'Online';
-      case 'away': return 'Away';
-      case 'busy': return 'Busy';
-      default: return 'Offline';
+  const getStatusColor = (isOnline: boolean) => {
+    return isOnline ? 'bg-green-500' : 'bg-gray-500';
+  };
+
+  const getStatusText = (isOnline: boolean) => {
+    return isOnline ? 'Online' : 'Offline';
+  };
+
+  const handleMessage = async (contact: Contact) => {
+    try {
+      const response = await api.post<any>('/chats/private/create/', {
+        participant_id: contact.id
+      });
+      router.push(`/dashboard/chat/${response.id}`);
+    } catch (error) {
+      console.error('Failed to create/get chat:', error);
     }
   };
 
   const filteredContacts = contacts
     .filter(contact => 
-      contact.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      contact.email.toLowerCase().includes(searchQuery.toLowerCase())
+      contact.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      contact.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      `${contact.first_name} ${contact.last_name}`.toLowerCase().includes(searchQuery.toLowerCase())
     )
     .slice(0, limit);
 
@@ -101,7 +110,7 @@ export function ContactsList({
               </Avatar>
               <div className={cn(
                 "absolute -bottom-1 -right-1 h-2 w-2 rounded-full border border-background",
-                getStatusColor(contact.status)
+                getStatusColor(contact.is_online)
               )} />
             </div>
           </div>
@@ -154,28 +163,23 @@ export function ContactsList({
                   </Avatar>
                   <div className={cn(
                     "absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-background",
-                    getStatusColor(contact.status)
+                    getStatusColor(contact.is_online)
                   )} />
                 </div>
                 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center space-x-2">
                     <p className="font-medium truncate">{contact.username}</p>
-                    {contact.is_favorite && (
-                      <Badge variant="outline" className="h-4 px-1 text-xs">
-                        ★
-                      </Badge>
-                    )}
                   </div>
                   <p className="text-xs text-muted-foreground truncate">
-                    {getStatusText(contact.status)}
+                    {getStatusText(contact.is_online)}
                   </p>
                 </div>
               </div>
 
               {showActions && (
                 <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleMessage(contact)}>
                     <MessageSquare className="h-3 w-3" />
                   </Button>
                   <Button variant="ghost" size="icon" className="h-7 w-7">

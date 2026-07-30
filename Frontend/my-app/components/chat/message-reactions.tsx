@@ -74,8 +74,8 @@ export function MessageReactions({
       acc[reaction.emoji].count++;
       acc[reaction.emoji].users.push({
         id: reaction.user,
-        username: reaction.user_info?.username || 'Unknown User',
-        display_name: reaction.user_info?.display_name || 'Unknown User',
+        username: reaction.user_info?.username || '',
+        display_name: reaction.user_info?.display_name || '',
         profile_image: reaction.user_info?.profile_image,
       });
       return acc;

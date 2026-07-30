@@ -114,7 +114,7 @@ export default function CallPage() {
   // Handle call end
   useEffect(() => {
     if (!activeCall && !isLoading && !isJoining && isAuthenticated) {
-      router.push('/chat');
+      router.push('/dashboard/chat');
     }
   }, [activeCall, isLoading, isJoining, isAuthenticated, router]);
 
@@ -164,7 +164,7 @@ export default function CallPage() {
           <h2 className="text-2xl font-bold mb-2">Call Error</h2>
           <p className="text-muted-foreground mb-6">{error}</p>
           <div className="space-x-4">
-            <Button onClick={() => router.push('/chat')}>Back to Chats</Button>
+            <Button onClick={() => router.push('/dashboard/chat')}>Back to Chats</Button>
             <Button variant="outline" onClick={clearError}>Try Again</Button>
           </div>
         </Card>

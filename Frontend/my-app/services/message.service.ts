@@ -34,11 +34,12 @@ export const messageService = {
     try {
       const formData = new FormData();
       
-      // Add text data
-      if (data.text) formData.append('text', data.text);
+      // Add text data - always include text field, even if empty
+      formData.append('text', data.text || '');
       if (data.chat) formData.append('chat', data.chat.toString());
       if (data.reply_to) formData.append('reply_to', data.reply_to.toString());
-      if (data.message_type) formData.append('message_type', data.message_type);
+      // Always include message_type, default to 'text' if not provided
+      formData.append('message_type', data.message_type || 'text');
       
       // Add location data
       if (data.latitude) formData.append('latitude', data.latitude.toString());
@@ -52,8 +53,18 @@ export const messageService = {
         });
       }
       
+      // Debug logging
+      console.log('Sending message data:', {
+        message_type: data.message_type,
+        text: data.text,
+        hasFiles: !!(data.files && data.files.length > 0),
+        fileName: data.files?.[0]?.name,
+        fileType: data.files?.[0]?.type
+      });
+      
       return await api.upload<Message>('/messages/create/', formData);
     } catch (error) {
+      console.error('Message send error:', error);
       throw new Error(extractErrorMessage(error));
     }
   },

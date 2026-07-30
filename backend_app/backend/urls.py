@@ -1,6 +1,11 @@
 # urls.py
 from django.urls import path
+from django.urls import include
+from rest_framework.routers import DefaultRouter
 from . import views
+
+router = DefaultRouter()
+router.register(r'contacts', views.ContactViewSet, basename='contact')
 
 urlpatterns = [
     # =====================
@@ -80,4 +85,9 @@ urlpatterns = [
     # =====================
     path('statistics/', views.UserStatisticsView.as_view(), name='statistics'),
     path('health/', views.HealthCheckView.as_view(), name='health'),
+    
+    # =====================
+    # 👥 CONTACTS
+    # =====================
+    path('', include(router.urls)),
 ]

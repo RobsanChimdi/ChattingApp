@@ -96,7 +96,7 @@ WSGI_APPLICATION = 'backend_app.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-USE_SQLITE = os.getenv('USE_SQLITE', '1') == '1'
+USE_SQLITE = os.getenv('USE_SQLITE', '0') == '1'
 
 if USE_SQLITE:
     DATABASES = {
@@ -111,7 +111,7 @@ else:
             'ENGINE': 'django.db.backends.mysql',
             'NAME': os.getenv('DB_NAME', 'chattingdb'),
             'USER': os.getenv('DB_USER', 'root'),
-            'PASSWORD': os.getenv('DB_PASSWORD', ''),
+            'PASSWORD': os.getenv('DB_PASSWORD', '@Robsan1234'),
             'HOST': os.getenv('DB_HOST', 'localhost'),
             'PORT': os.getenv('DB_PORT', '3306'),
         }

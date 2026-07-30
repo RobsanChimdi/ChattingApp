@@ -82,8 +82,10 @@ export const useChat = (chatId?: number): UseChatReturn => {
     : new Set<number>();
 
   useEffect(() => {
-    if (user) fetchChatsAction().catch(console.error);
-  }, [user, fetchChatsAction]);
+    if (user && chats.length === 0) {
+      fetchChatsAction().catch(console.error);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (activeChatId) {
@@ -95,13 +97,22 @@ export const useChat = (chatId?: number): UseChatReturn => {
     } else {
       setCurrentChatAction(null);
     }
-  }, [activeChatId, chats, setCurrentChatAction, fetchMessagesAction, storeMessages]);
+  }, [activeChatId]);
 
   useEffect(() => {
     if (!activeChatId) return;
 
     const unsubscribeNewMessage = on('new_message', (data: { message: Message }) => {
-      if (data.message.chat === activeChatId && data.message.sender !== user?.id) {
+      // Only add message if it's for the current chat and not from current user
+      // (current user's messages are added locally when sent)
+      // Also check if message already exists to prevent duplicates from socket
+      const existingMessages = useChatStore.getState().messages.get(activeChatId) || [];
+      const messageExists = existingMessages.some(msg => msg.id === data.message.id);
+      
+      if (data.message.chat === activeChatId && 
+          data.message.sender !== user?.id && 
+          !messageExists) {
+        useChatStore.getState().addMessage(activeChatId, data.message);
         messageService.markMessageAsRead(data.message.id).catch(console.error);
       }
     });

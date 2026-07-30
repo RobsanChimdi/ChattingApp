@@ -89,8 +89,8 @@ export default function CallsPage() {
   };
 
   const filteredCalls = calls.filter((call) => {
-    const otherParticipant = call.participants?.find((p) => p.user.id !== user?.id);
-    const matchesSearch = otherParticipant?.user.username?.toLowerCase().includes(searchQuery.toLowerCase());
+    const otherParticipant = call.participants?.find((p) => p.user?.id !== user?.id);
+    const matchesSearch = otherParticipant?.user?.username?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const { direction } = getCallDisplay(call);
     const matchesFilter = filter === 'all' || direction === filter;

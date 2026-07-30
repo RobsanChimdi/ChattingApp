@@ -1,12 +1,9 @@
-// components/chat/MessageInput.tsx
-'use client';
-
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useMessages } from '@/hooks/useMessage';
 import { useChat } from '@/hooks/useChat';
-import { Smile, Paperclip, Mic, Send, X } from 'lucide-react';
+import { Smile, Paperclip, Mic, Send, X, Trash2, Check } from 'lucide-react';
 
 interface MessageInputProps {
   value: string;
@@ -20,9 +17,18 @@ interface MessageInputProps {
 export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, chatId }: MessageInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const { uploadMedia, replyToMessage, setReplyTo } = useMessages(chatId);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [audioLevels, setAudioLevels] = useState<number[]>([30, 50, 80, 40, 70, 90, 60, 40, 75, 55, 85, 45, 65, 95, 50, 30]);
+
+  const { uploadMedia, replyToMessage, setReplyTo, sendMessage } = useMessages(chatId);
   const { startTyping, stopTyping } = useChat(chatId);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const shouldSendRef = useRef<boolean>(true);
 
   const handleTyping = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     onChange(e.target.value);
@@ -45,12 +51,136 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
     setIsUploading(true);
     try {
       for (let i = 0; i < files.length; i++) await uploadMedia(files[i]);
-    } catch (error) { console.error('Failed to upload files:', error);
-    } finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+    } catch (error) { 
+      console.error('Failed to upload files:', error);
+    } finally { 
+      setIsUploading(false); 
+      if (fileInputRef.current) fileInputRef.current.value = ''; 
+    }
   };
 
-  const handleStartRecording = () => setIsRecording(true);
-  const handleStopRecording = () => setIsRecording(false);
+  const startLiveAudioAnalysis = (stream: MediaStream) => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioCtxRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const updateLevels = () => {
+        analyser.getByteFrequencyData(dataArray);
+        const levels: number[] = [];
+        const barCount = 16;
+        const step = Math.max(1, Math.floor(bufferLength / barCount));
+
+        for (let i = 0; i < barCount; i++) {
+          const val = dataArray[i * step] || 0;
+          const heightPercent = Math.max(15, Math.min(100, (val / 255) * 100));
+          levels.push(heightPercent);
+        }
+        setAudioLevels(levels);
+        animFrameRef.current = requestAnimationFrame(updateLevels);
+      };
+
+      updateLevels();
+    } catch (err) {
+      console.warn('Audio analysis setup failed:', err);
+    }
+  };
+
+  const stopLiveAudioAnalysis = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
+  };
+
+  const handleStartRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      shouldSendRef.current = true;
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorderRef.current.onstop = async () => {
+        stopLiveAudioAnalysis();
+        if (shouldSendRef.current && audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const audioFile = new File([audioBlob], `voice-message-${Date.now()}.webm`, { type: 'audio/webm' });
+          
+          setIsUploading(true);
+          try {
+            await sendMessage('', [audioFile]);
+          } catch (error) {
+            console.error('Failed to send voice message:', error);
+          } finally {
+            setIsUploading(false);
+          }
+        }
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorderRef.current.start();
+      startLiveAudioAnalysis(stream);
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+    }
+  };
+
+  const handleCancelRecording = () => {
+    shouldSendRef.current = false;
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      setRecordingTime(0);
+    }
+  };
+
+  const handleSendRecording = () => {
+    shouldSendRef.current = true;
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      setRecordingTime(0);
+    }
+  };
+
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className="space-y-2">
@@ -65,16 +195,74 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
       )}
 
       <div className="flex items-end space-x-2">
-        <Button variant="ghost" size="icon" disabled={disabled || isUploading} onClick={() => fileInputRef.current?.click()}>
+        <Button variant="ghost" size="icon" disabled={disabled || isUploading || isRecording} onClick={() => fileInputRef.current?.click()}>
           {isUploading ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> : <Paperclip className="h-5 w-5" />}
         </Button>
-        <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/*,video/*,.pdf,.doc,.docx,.txt" onChange={handleFileSelect} />
-        <Button variant="ghost" size="icon" disabled={disabled}><Smile className="h-5 w-5" /></Button>
-        <div className="flex-1 relative"><Textarea value={value} onChange={handleTyping} onKeyDown={handleKeyDown} placeholder="Type a message..." className="min-h-[40px] max-h-[120px] resize-none" disabled={disabled} rows={1} /></div>
-        {value.trim() || isRecording ? (
-          <Button size="icon" onClick={onSend} disabled={disabled || !value.trim()}><Send className="h-5 w-5" /></Button>
+        <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/*,video/*,.pdf,.doc,.docx,.txt,audio/*" onChange={handleFileSelect} />
+        <Button variant="ghost" size="icon" disabled={disabled || isRecording}><Smile className="h-5 w-5" /></Button>
+        
+        <div className="flex-1 relative">
+          {isRecording ? (
+            <div className="flex items-center justify-between p-2 px-3 bg-destructive/10 border border-destructive/20 rounded-xl space-x-3">
+              <div className="flex items-center space-x-2">
+                <div className="h-2.5 w-2.5 bg-destructive rounded-full animate-ping" />
+                <span className="text-xs font-mono font-medium text-destructive">{formatRecordingTime(recordingTime)}</span>
+              </div>
+              
+              {/* Real-time mic waveform visualization */}
+              <div className="flex items-center space-x-1 h-6 flex-1 justify-center max-w-[180px]">
+                {audioLevels.map((lvl, idx) => (
+                  <div
+                    key={idx}
+                    className="w-1 bg-destructive/70 rounded-full transition-all duration-75"
+                    style={{ height: `${lvl}%` }}
+                  />
+                ))}
+              </div>
+
+              <span className="text-xs text-muted-foreground hidden sm:inline">Recording...</span>
+            </div>
+          ) : (
+            <Textarea 
+              value={value} 
+              onChange={handleTyping} 
+              onKeyDown={handleKeyDown} 
+              placeholder="Type a message..." 
+              className="min-h-[40px] max-h-[120px] resize-none rounded-xl" 
+              disabled={disabled} 
+              rows={1} 
+            />
+          )}
+        </div>
+
+        {isRecording ? (
+          <div className="flex items-center space-x-1">
+            <Button 
+              size="icon" 
+              variant="ghost" 
+              onClick={handleCancelRecording} 
+              className="text-destructive hover:bg-destructive/10"
+              title="Cancel recording"
+            >
+              <Trash2 className="h-5 w-5" />
+            </Button>
+            <Button 
+              size="icon" 
+              onClick={handleSendRecording} 
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              title="Send voice message"
+            >
+              <Send className="h-5 w-5" />
+            </Button>
+          </div>
+        ) : value.trim() ? (
+          <Button size="icon" onClick={onSend} disabled={disabled || !value.trim()}>
+            <Send className="h-5 w-5" />
+          </Button>
         ) : (
-          <Button variant="ghost" size="icon" onClick={isRecording ? handleStopRecording : handleStartRecording} disabled={disabled} className={isRecording ? "text-destructive animate-pulse" : ""}><Mic className="h-5 w-5" /></Button>
+          <Button variant="ghost" size="icon" onClick={handleStartRecording} disabled={disabled || isUploading} title="Record voice message">
+            <Mic className="h-5 w-5" />
+          </Button>
         )}
       </div>
     </div>

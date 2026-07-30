@@ -51,13 +51,8 @@ class MediaService {
     if (this.isInitialized) return;
 
     try {
-      // Request permission for audio first
-      try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (error) {
-        console.warn('Audio permission not granted:', error);
-      }
-      
+      // Don't request audio permissions during initialization
+      // Only request when actually needed (e.g., when recording)
       await this.refreshDevices();
       
       // Listen for device changes

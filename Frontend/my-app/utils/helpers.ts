@@ -1,4 +1,47 @@
-import { MEDIA_TYPES, APP } from './constants';
+import { MEDIA_TYPES } from './constants';
+
+/**
+ * Resolve relative media paths to absolute backend URLs
+ */
+export const getMediaUrl = (mediaInput?: string | any | null): string => {
+  if (!mediaInput) return '';
+  const mediaPath = typeof mediaInput === 'string' ? mediaInput : (mediaInput.url || mediaInput.file_url || mediaInput.file || '');
+  if (!mediaPath) return '';
+
+  if (mediaPath.startsWith('http://') || mediaPath.startsWith('https://') || mediaPath.startsWith('blob:') || mediaPath.startsWith('data:')) {
+    return mediaPath;
+  }
+  
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+  const origin = apiBase.replace(/\/api\/?$/, '');
+  
+  let cleanPath = mediaPath;
+  if (!cleanPath.startsWith('/') && !cleanPath.startsWith('media/')) {
+    cleanPath = `/media/${cleanPath}`;
+  } else if (!cleanPath.startsWith('/')) {
+    cleanPath = `/${cleanPath}`;
+  }
+  
+  return `${origin}${cleanPath}`;
+};
+
+/**
+ * Check if media is an audio file
+ */
+export const isAudioMedia = (media: any, messageType?: string): boolean => {
+  if (messageType === 'audio') return true;
+  if (!media) return false;
+  
+  const url = media.url || media.file_url || media.file || '';
+  const mime = (media.mime_type || '').toLowerCase();
+  const type = (media.file_type || '').toLowerCase();
+  const ext = getFileExtension(media.file_name || url || '');
+
+  if (mime.startsWith('audio/')) return true;
+  if (type === 'audio') return true;
+  if (['mp3', 'wav', 'ogg', 'webm', 'm4a', 'flac', 'aac', 'opus'].includes(ext)) return true;
+  return false;
+};
 
 /**
  * Get file extension from filename
@@ -69,7 +112,7 @@ export const getUserDisplayName = (
   firstName?: string,
   lastName?: string,
   username?: string
-): string => {
+): string | undefined => {
   if (firstName && lastName) {
     return `${firstName} ${lastName}`;
   }
@@ -78,7 +121,7 @@ export const getUserDisplayName = (
     return firstName;
   }
   
-  return username || 'Unknown User';
+  return username;
 };
 
 /**

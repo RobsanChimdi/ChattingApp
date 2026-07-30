@@ -48,8 +48,8 @@ export default function AddContactPage() {
 
   const loadExistingContacts = async () => {
     try {
-      const response = await api.get<Contact[]>('/users/');
-      setAddedContacts(new Set(response.map((c: Contact) => c.id)));
+      const response = await api.get<any[]>('/contacts/');
+      setAddedContacts(new Set(response.map((c: any) => c.contact_user.id)));
     } catch (error) {
       console.error('Failed to load existing contacts:', error);
     }

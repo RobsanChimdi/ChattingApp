@@ -63,11 +63,27 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
       return null;
     }
     try {
+      // Determine message type based on files
+      let messageType: 'text' | 'image' | 'video' | 'audio' | 'file' = 'text';
+      if (files && files.length > 0) {
+        const firstFile = files[0];
+        if (firstFile.type.startsWith('audio/')) {
+          messageType = 'audio';
+        } else if (firstFile.type.startsWith('image/')) {
+          messageType = 'image';
+        } else if (firstFile.type.startsWith('video/')) {
+          messageType = 'video';
+        } else {
+          messageType = 'file';
+        }
+      }
+      
       const messageData: MessageCreateData = {
         chat: chatId,
         text: text.trim(),
         files,
         reply_to: replyToMessage?.id,
+        message_type: messageType,
       };
       const msg = await sendMessageAction(chatId, messageData);
       setReplyToMessage(null);
