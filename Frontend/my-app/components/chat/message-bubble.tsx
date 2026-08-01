@@ -29,12 +29,21 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(message.text || '');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   
   const isOwnMessage = message.sender === user?.id;
   const isDeleted = message.is_deleted;
   const hasMedia = message.media && message.media.length > 0;
   const isForwarded = message.is_forwarded;
   const hasReply = message.reply_to && message.reply_to_info;
+
+  console.log('MessageBubble rendering:', { 
+    message, 
+    message_type: message.message_type, 
+    hasMedia, 
+    media: message.media,
+    isOwnMessage 
+  });
 
   const handleEdit = async () => {
     if (editText.trim() && editText !== message.text) {
@@ -48,7 +57,10 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
   };
 
   const handleCopy = () => {
-    if (message.text) navigator.clipboard.writeText(message.text);
+    const textToCopy = message.text || '';
+    if (textToCopy) {
+      navigator.clipboard.writeText(textToCopy);
+    }
   };
 
   const handleForward = async () => {
@@ -78,8 +90,11 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
       const mediaUrl = getMediaUrl(media);
       const thumbnailUrl = getThumbnailUrl(media);
 
+      console.log('Rendering media:', { media, mediaUrl, message_type: message.message_type });
+
       // Detect audio by message_type OR mime_type OR file_type OR extension
       if (isAudioMedia(media, message.message_type)) {
+        console.log('Rendering AudioWaveform for media:', media);
         return (
           <AudioWaveform
             key={media.id}
@@ -236,35 +251,33 @@ export function MessageBubble({ message, chatType, isSelected }: MessageBubblePr
             </div>
           </div>
 
-          {(isHovered || isSelected) && !isEditing && (
+          {(isHovered || isSelected || isMenuOpen) && !isEditing && (
             <div className={cn(
-              "absolute flex items-center space-x-1 -top-2 z-10", 
+              "absolute flex items-center space-x-1 -top-2 z-50", 
               isOwnMessage ? "right-2" : "left-2"
             )}>
-              <DropdownMenu>
+              <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <Button size="icon" variant="secondary" className="h-6 w-6 shadow-md">
                     <MoreVertical className="h-3 w-3" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align={isOwnMessage ? "end" : "start"} className="z-50">
+                <DropdownMenuContent align={isOwnMessage ? "end" : "start"} className="z-[100] w-48">
                   <DropdownMenuItem onClick={() => setReplyTo(message)}>
                     <Reply className="h-4 w-4 mr-2" />Reply
                   </DropdownMenuItem>
-                  {message.text && (
-                    <DropdownMenuItem onClick={handleCopy}>
-                      <Copy className="h-4 w-4 mr-2" />Copy
-                    </DropdownMenuItem>
-                  )}
+                  <DropdownMenuItem onClick={handleCopy}>
+                    <Copy className="h-4 w-4 mr-2" />Copy
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleForward}>
                     <Forward className="h-4 w-4 mr-2" />Forward
                   </DropdownMenuItem>
-                  {canEditMessage(message) && (
+                  {isOwnMessage && canEditMessage(message) && (
                     <DropdownMenuItem onClick={() => setIsEditing(true)}>
                       <Edit className="h-4 w-4 mr-2" />Edit
                     </DropdownMenuItem>
                   )}
-                  {canDeleteMessage(message) && (
+                  {isOwnMessage && (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem className="text-destructive" onClick={handleDelete}>

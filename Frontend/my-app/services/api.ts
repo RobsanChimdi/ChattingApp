@@ -119,6 +119,9 @@ class ApiClient {
     try {
       const response = await this.client.post<T>(url, formData, {
         // Don't set Content-Type header - Axios will set it automatically with boundary
+        headers: {
+          'Content-Type': undefined, // Remove the default application/json
+        },
         onUploadProgress: (progressEvent) => {
           if (onProgress && progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);

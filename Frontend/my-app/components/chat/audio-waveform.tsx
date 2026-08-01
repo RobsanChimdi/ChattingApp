@@ -32,6 +32,8 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
 
   const rawUrl = media?.url || media?.file_url || media?.file || '';
   const audioUrl = getMediaUrl(rawUrl);
+  
+  console.log('AudioWaveform props:', { media, messageType, isOwnMessage, rawUrl, audioUrl });
 
   // Generate deterministic pseudo peaks based on file ID / URL for fast fallback
   const generateFallbackPeaks = useCallback((count: number, seed: string) => {
@@ -50,8 +52,12 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
 
   // Fetch audio file & extract peak amplitudes using Web Audio API
   useEffect(() => {
-    if (!audioUrl) return;
+    if (!audioUrl) {
+      console.warn('No audio URL provided');
+      return;
+    }
 
+    console.log('Loading audio from:', audioUrl);
     let isMounted = true;
     const fallback = generateFallbackPeaks(BAR_COUNT, String(media?.id || audioUrl));
     setPeaks(fallback);
@@ -59,11 +65,17 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
     async function extractAudioPeaks() {
       try {
         const response = await fetch(audioUrl);
-        if (!response.ok) return;
+        if (!response.ok) {
+          console.error('Failed to fetch audio:', response.status, response.statusText);
+          return;
+        }
 
         const arrayBuffer = await response.arrayBuffer();
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        if (!AudioContextClass) return;
+        if (!AudioContextClass) {
+          console.warn('AudioContext not supported');
+          return;
+        }
 
         const audioCtx = new AudioContextClass();
         const decodedData = await audioCtx.decodeAudioData(arrayBuffer);
@@ -76,6 +88,7 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
 
         if (decodedData.duration && !duration) {
           setDuration(decodedData.duration);
+          console.log('Audio duration:', decodedData.duration);
         }
 
         const samplesPerBar = Math.floor(channelData.length / BAR_COUNT);
@@ -93,9 +106,11 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
 
         if (isMounted && extractedPeaks.length === BAR_COUNT) {
           setPeaks(extractedPeaks);
+          console.log('Audio peaks extracted successfully');
         }
         audioCtx.close();
       } catch (err) {
+        console.error('Error extracting audio peaks:', err);
         // Fallback peaks already set, ignore CORS or decode errors silently
       }
     }
@@ -204,6 +219,13 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const formatFileSize = (bytes: number) => {
+    if (!bytes || isNaN(bytes)) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0;
   const currentBarIndex = Math.floor(progressFraction * BAR_COUNT);
 
@@ -278,7 +300,7 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
         </button>
       </div>
 
-      {/* Footer Info: Current Time / Duration & Download */}
+      {/* Footer Info: Current Time / Duration & File Size */}
       <div className="flex items-center justify-between text-[11px] font-mono px-0.5 opacity-80">
         <div className="flex items-center gap-1">
           {hasError ? (
@@ -292,18 +314,25 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
           )}
         </div>
 
-        {audioUrl && (
-          <a
-            href={audioUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            download
-            className="hover:opacity-100 transition-opacity p-0.5"
-            title="Download Audio"
-          >
-            <Download className="h-3.5 w-3.5" />
-          </a>
-        )}
+        <div className="flex items-center gap-2">
+          {media?.file_size && (
+            <span className="text-[11px] opacity-70">
+              {formatFileSize(media.file_size)}
+            </span>
+          )}
+          {audioUrl && (
+            <a
+              href={audioUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              download
+              className="hover:opacity-100 transition-opacity p-0.5"
+              title="Download Audio"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Hidden Native Audio Element */}

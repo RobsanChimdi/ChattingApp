@@ -315,8 +315,10 @@ export const useChatStore = create<ChatStore>()(
           const chatMessages = state.messages.get(chatId) || [];
           // Check if message already exists to prevent duplicates
           if (chatMessages.some(msg => msg.id === message.id)) {
+            console.log('Duplicate message prevented:', message.id);
             return state;
           }
+          console.log('Adding message to chat:', chatId, message.id);
           // Add message and sort by created_at
           const updatedMessages = [...chatMessages, message].sort((a, b) => 
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
@@ -328,11 +330,6 @@ export const useChatStore = create<ChatStore>()(
             ),
           };
         });
-        
-        const currentUser = useAuthStore.getState().user;
-        if (currentUser && message.sender !== currentUser.id) {
-          get().incrementUnreadCount(chatId);
-        }
       },
       
       updateMessage: (chatId, message) => {

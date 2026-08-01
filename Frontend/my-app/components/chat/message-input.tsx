@@ -41,7 +41,7 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       stopTyping();
-      onSend();
+      // Don't call onSend() here - onKeyPress already handles it
     }
   };
 

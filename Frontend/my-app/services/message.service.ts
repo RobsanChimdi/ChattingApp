@@ -62,7 +62,9 @@ export const messageService = {
         fileType: data.files?.[0]?.type
       });
       
-      return await api.upload<Message>('/messages/create/', formData);
+      const response = await api.upload<Message>('/messages/create/', formData);
+      console.log('Backend response:', response);
+      return response;
     } catch (error) {
       console.error('Message send error:', error);
       throw new Error(extractErrorMessage(error));

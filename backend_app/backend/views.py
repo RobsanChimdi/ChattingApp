@@ -932,10 +932,7 @@ class ChatMessagesView(generics.ListAPIView):
         ).select_related(
             'sender', 'reply_to'
         ).prefetch_related(
-            Prefetch('media', queryset=MessageMedia.objects.only(
-                'id', 'message', 'file', 'file_name', 'file_size',
-                'mime_type', 'duration', 'width', 'height', 'thumbnail'
-            )),
+            Prefetch('media', queryset=MessageMedia.objects.all()),
             Prefetch('reactions', queryset=MessageReaction.objects.select_related('user').only(
                 'id', 'message', 'user', 'emoji', 'reacted_at'
             )),
@@ -993,6 +990,11 @@ class MessageCreateView(generics.CreateAPIView):
     
     def create(self, request, *args, **kwargs):
         try:
+            # Debug logging
+            print(f"DEBUG: Request data keys: {list(request.data.keys())}")
+            print(f"DEBUG: Request FILES keys: {list(request.FILES.keys()) if request.FILES else 'None'}")
+            print(f"DEBUG: Request FILES: {request.FILES}")
+            
             # Validate chat exists and user is participant before serializer validation
             chat_id = request.data.get('chat')
             if not chat_id:
@@ -1121,6 +1123,11 @@ class MessageCreateView(generics.CreateAPIView):
                 mime_type=mime_type
             )
             media_objects.append(media)
+            
+            # Debug logging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Created media object: id={media.id}, file={media.file_name}, mime_type={media.mime_type}")
         
         # Clear unread count cache for all participants
         for participant in chat.participants.all():
@@ -1129,11 +1136,19 @@ class MessageCreateView(generics.CreateAPIView):
         # Return complete message with media
         response_serializer = self.get_serializer(message)
         response_data = response_serializer.data
+        
+        # Debug logging - use print instead of logger
+        print(f"DEBUG: Response data before media override: media count = {len(response_data.get('media', []))}")
+        print(f"DEBUG: Media objects count: {len(media_objects)}")
+        print(f"DEBUG: Media objects: {[(m.id, m.file_name, m.mime_type) for m in media_objects]}")
+        
         response_data['media'] = MessageMediaSerializer(
             media_objects, 
             many=True, 
             context={'request': request}
         ).data
+        
+        print(f"DEBUG: Response data after media override: media count = {len(response_data.get('media', []))}")
         
         return Response(response_data, status=status.HTTP_201_CREATED)
 
