@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useMessages } from '@/hooks/useMessage';
 import { useChat } from '@/hooks/useChat';
-import { Smile, Paperclip, Mic, Send, X, Trash2, Check } from 'lucide-react';
+import { Smile, Paperclip, Mic, Send, X, Trash2 } from 'lucide-react';
 
 interface MessageInputProps {
   value: string;
@@ -18,11 +19,13 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
   const [isRecording, setIsRecording] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [audioLevels, setAudioLevels] = useState<number[]>([30, 50, 80, 40, 70, 90, 60, 40, 75, 55, 85, 45, 65, 95, 50, 30]);
 
   const { uploadMedia, replyToMessage, setReplyTo, sendMessage } = useMessages(chatId);
   const { startTyping, stopTyping } = useChat(chatId);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -45,6 +48,24 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
     }
   };
 
+  const commonEmojis = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '👏', '🙏', '😊'];
+
+  const insertEmoji = useCallback((emoji: string) => {
+    const textarea = textareaRef.current;
+    const cursorStart = textarea?.selectionStart ?? value.length;
+    const cursorEnd = textarea?.selectionEnd ?? value.length;
+    const nextValue = `${value.slice(0, cursorStart)}${emoji}${value.slice(cursorEnd)}`;
+
+    onChange(nextValue);
+    setShowEmojiPicker(false);
+
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      const nextCursor = cursorStart + emoji.length;
+      textarea?.setSelectionRange(nextCursor, nextCursor);
+    });
+  }, [onChange, value]);
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -61,7 +82,12 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
 
   const startLiveAudioAnalysis = (stream: MediaStream) => {
     try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioContextConstructor = window.AudioContext || (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextConstructor) {
+        return;
+      }
+
+      const audioCtx = new AudioContextConstructor();
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
@@ -199,7 +225,31 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
           {isUploading ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> : <Paperclip className="h-5 w-5" />}
         </Button>
         <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/*,video/*,.pdf,.doc,.docx,.txt,audio/*" onChange={handleFileSelect} />
-        <Button variant="ghost" size="icon" disabled={disabled || isRecording}><Smile className="h-5 w-5" /></Button>
+        <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon" disabled={disabled || isRecording}>
+              <Smile className="h-5 w-5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[280px] rounded-2xl border border-border/60 bg-popover/95 p-3 shadow-xl backdrop-blur-md" align="start" side="top" sideOffset={12}>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground">Insert emoji</p>
+              <span className="text-[11px] text-muted-foreground">Tap to add</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {commonEmojis.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => insertEmoji(emoji)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-2xl transition-all duration-150 hover:scale-105 hover:bg-accent"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
         
         <div className="flex-1 relative">
           {isRecording ? (
@@ -224,6 +274,7 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
             </div>
           ) : (
             <Textarea 
+              ref={textareaRef}
               value={value} 
               onChange={handleTyping} 
               onKeyDown={handleKeyDown} 

@@ -18,9 +18,9 @@ interface UseMessagesReturn {
   selectMessage: (message: Message | null) => void;
   setReplyTo: (message: Message | null) => void;
   clearSelection: () => void;
-  addReaction: (emoji: string) => Promise<void>;
-  removeReaction: (emoji: string) => Promise<void>;
-  uploadMedia: (file: File) => Promise<any>;
+  addReaction: (emoji: string, messageId?: number) => Promise<void>;
+  removeReaction: (emoji: string, messageId?: number) => Promise<void>;
+  uploadMedia: (file: File) => Promise<unknown>;
   markAsRead: (messageId: number) => Promise<void>;
   searchInMessages: (query: string) => Message[];
   canEditMessage: (message: Message) => boolean;
@@ -29,13 +29,13 @@ interface UseMessagesReturn {
 }
 
 export const useMessages = (chatId?: number): UseMessagesReturn => {
-  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
-  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const {
     messages: storeMessages,
+    selectedMessage,
+    replyToMessage,
     isLoading: storeLoading,
     error: storeError,
     sendMessage: sendMessageAction,
@@ -45,6 +45,8 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
     addReaction: addReactionAction,
     removeReaction: removeReactionAction,
     clearError: clearStoreError,
+    setSelectedMessage,
+    setReplyToMessage,
   } = useChatStore();
 
   const { user } = useAuthStore();
@@ -55,7 +57,9 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
   useEffect(() => {
     setLocalError(null);
     clearStoreError();
-  }, [chatId, clearStoreError]);
+    setSelectedMessage(null);
+    setReplyToMessage(null);
+  }, [chatId, clearStoreError, setSelectedMessage, setReplyToMessage]);
 
   const sendMessage = useCallback(async (text: string, files?: File[]) => {
     if (!chatId) {
@@ -88,29 +92,29 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
       const msg = await sendMessageAction(chatId, messageData);
       setReplyToMessage(null);
       return msg;
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to send message');
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to send message');
       return null;
     }
-  }, [chatId, replyToMessage, sendMessageAction]);
+  }, [chatId, replyToMessage, sendMessageAction, setReplyToMessage]);
 
   const editMessage = useCallback(async (messageId: number, text: string) => {
     if (!chatId) return setLocalError('No active chat selected');
     try {
       await editMessageAction(chatId, messageId, text);
       setSelectedMessage(null);
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to edit message');
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to edit message');
     }
-  }, [chatId, editMessageAction]);
+  }, [chatId, editMessageAction, setSelectedMessage]);
 
   const deleteMessage = useCallback(async (messageId: number) => {
     if (!chatId) return setLocalError('No active chat selected');
     try {
       await deleteMessageAction(chatId, messageId);
       setSelectedMessage(null);
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to delete message');
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to delete message');
     }
   }, [chatId, deleteMessageAction]);
 
@@ -119,30 +123,34 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
     try {
       await forwardMessageAction(selectedMessage.id, targetChatId);
       setSelectedMessage(null);
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to forward message');
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to forward message');
     }
   }, [selectedMessage, forwardMessageAction]);
 
-  const addReaction = useCallback(async (emoji: string) => {
-    if (!selectedMessage || !chatId || !user) return;
+  const addReaction = useCallback(async (emoji: string, messageId?: number) => {
+    const targetMessageId = messageId ?? selectedMessage?.id;
+    if (!targetMessageId || !chatId || !user) return;
     try {
-      await messageService.addReaction(selectedMessage.id, emoji);
+      const reaction = await messageService.addReaction(targetMessageId, emoji);
+      addReactionAction(chatId, targetMessageId, reaction);
       setSelectedMessage(null);
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to add reaction');
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to add reaction');
     }
-  }, [selectedMessage, chatId, user]);
+  }, [selectedMessage, chatId, user, addReactionAction, setSelectedMessage]);
 
-  const removeReaction = useCallback(async (emoji: string) => {
-    if (!selectedMessage || !chatId || !user) return;
+  const removeReaction = useCallback(async (emoji: string, messageId?: number) => {
+    const targetMessageId = messageId ?? selectedMessage?.id;
+    if (!targetMessageId || !chatId || !user) return;
     try {
-      await messageService.removeReaction(selectedMessage.id, emoji);
+      await messageService.removeReaction(targetMessageId, emoji);
+      removeReactionAction(chatId, targetMessageId, user.id);
       setSelectedMessage(null);
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to remove reaction');
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to remove reaction');
     }
-  }, [selectedMessage, chatId, user]);
+  }, [selectedMessage, chatId, user, removeReactionAction, setSelectedMessage]);
 
   const uploadMedia = useCallback(async (file: File) => {
     if (!chatId) {
@@ -152,8 +160,8 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
     setIsUploading(true);
     try {
       return await messageService.uploadMedia(chatId, file);
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to upload media');
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to upload media');
       return null;
     } finally {
       setIsUploading(false);
@@ -191,17 +199,17 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
   const selectMessage = useCallback((message: Message | null) => {
     setSelectedMessage(message);
     if (message) setReplyToMessage(null);
-  }, []);
+  }, [setReplyToMessage, setSelectedMessage]);
 
   const setReplyTo = useCallback((message: Message | null) => {
     setReplyToMessage(message);
     if (message) setSelectedMessage(null);
-  }, []);
+  }, [setReplyToMessage, setSelectedMessage]);
 
   const clearSelection = useCallback(() => {
     setSelectedMessage(null);
     setReplyToMessage(null);
-  }, []);
+  }, [setReplyToMessage, setSelectedMessage]);
 
   const clearError = useCallback(() => {
     setLocalError(null);
