@@ -15,6 +15,8 @@ interface ChatStore {
   unreadCounts: Map<number, number>;
   typingUsers: Map<number, Set<number>>; // chatId -> userIds
   onlineUsers: Map<number, { is_online: boolean; last_seen?: string }>;
+  selectedMessage: Message | null;
+  replyToMessage: Message | null;
   isLoading: boolean;
   isSending: boolean;
   error: string | null;
@@ -45,7 +47,7 @@ interface ChatStore {
   
   // Reactions
   addReaction: (chatId: number, messageId: number, reaction: MessageReaction) => void;
-  removeReaction: (chatId: number, messageId: number, userId: number) => void;
+  removeReaction: (chatId: number, messageId: number, userId: number, emoji?: string) => void;
   
   // Message status
   updateMessageStatus: (
@@ -79,6 +81,8 @@ interface ChatStore {
   // UI State
   setLoading: (loading: boolean) => void;
   setSending: (sending: boolean) => void;
+  setSelectedMessage: (message: Message | null) => void;
+  setReplyToMessage: (message: Message | null) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
   
@@ -98,6 +102,8 @@ export const useChatStore = create<ChatStore>()(
       unreadCounts: new Map(),
       typingUsers: new Map(),
       onlineUsers: new Map(),
+      selectedMessage: null,
+      replyToMessage: null,
       isLoading: false,
       isSending: false,
       error: null,
@@ -206,24 +212,25 @@ export const useChatStore = create<ChatStore>()(
       
       // ========== MESSAGE ACTIONS ==========
       fetchMessages: async (chatId, page = 1) => {
+        const startTime = performance.now();
         set({ isLoading: true, error: null });
-        
+
         try {
           const response = await chatService.getMessages(chatId, page);
           const currentMessages = get().messages.get(chatId) || [];
-          
+
           // Deduplicate messages by ID
           const messageMap = new Map<number, Message>();
           [...currentMessages, ...response.results].forEach(msg => {
             messageMap.set(msg.id, msg);
           });
           const uniqueMessages = Array.from(messageMap.values());
-          
+
           // Sort messages by created_at in ascending order (oldest first)
-          uniqueMessages.sort((a, b) => 
+          uniqueMessages.sort((a, b) =>
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
-          
+
           set((state) => ({
             messages: new Map(state.messages).set(
               chatId,
@@ -231,6 +238,9 @@ export const useChatStore = create<ChatStore>()(
             ),
             isLoading: false,
           }));
+
+          const elapsed = performance.now() - startTime;
+          console.log(`DEBUG: fetchMessages for chat ${chatId} took ${elapsed.toFixed(2)}ms`);
         } catch (error: any) {
           set({
             error: error.response?.data?.error || 'Failed to fetch messages',
@@ -376,13 +386,13 @@ export const useChatStore = create<ChatStore>()(
               chatMessages.map((msg) => {
                 if (msg.id === messageId) {
                   const existingReactions = msg.reactions || [];
-                  const existingIndex = existingReactions.findIndex(
-                    (r) => r.user === reaction.user && r.emoji === reaction.emoji
+                  const existingUserReactionIndex = existingReactions.findIndex(
+                    (r) => r.user === reaction.user
                   );
                   
-                  if (existingIndex >= 0) {
+                  if (existingUserReactionIndex >= 0) {
                     const updatedReactions = [...existingReactions];
-                    updatedReactions[existingIndex] = reaction;
+                    updatedReactions[existingUserReactionIndex] = reaction;
                     return { ...msg, reactions: updatedReactions };
                   }
                   return { ...msg, reactions: [...existingReactions, reaction] };
@@ -394,7 +404,7 @@ export const useChatStore = create<ChatStore>()(
         });
       },
       
-      removeReaction: (chatId, messageId, userId) => {
+      removeReaction: (chatId, messageId, userId, emoji?: string) => {
         set((state) => {
           const chatMessages = state.messages.get(chatId);
           if (!chatMessages) return state;
@@ -405,7 +415,12 @@ export const useChatStore = create<ChatStore>()(
               chatMessages.map((msg) => {
                 if (msg.id === messageId) {
                   const reactions = msg.reactions || [];
-                  return { ...msg, reactions: reactions.filter((r) => r.user !== userId) };
+                  const nextReactions = reactions.filter((r) => {
+                    if (r.user !== userId) return true;
+                    if (!emoji) return false;
+                    return r.emoji !== emoji;
+                  });
+                  return { ...msg, reactions: nextReactions };
                 }
                 return msg;
               }),
@@ -598,6 +613,8 @@ export const useChatStore = create<ChatStore>()(
       // ========== UI STATE ==========
       setLoading: (loading) => set({ isLoading: loading }),
       setSending: (sending) => set({ isSending: sending }),
+      setSelectedMessage: (message) => set({ selectedMessage: message }),
+      setReplyToMessage: (message) => set({ replyToMessage: message }),
       setError: (error) => set({ error }),
       clearError: () => set({ error: null }),
       

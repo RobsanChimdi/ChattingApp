@@ -493,18 +493,9 @@ class MessageStatus(models.Model):
 
 
 class MessageReaction(models.Model):
-    EMOJI_CHOICES = [
-        ("👍", "Thumbs Up"),
-        ("❤️", "Heart"),
-        ("😂", "Laughing"),
-        ("😮", "Surprised"),
-        ("😢", "Crying"),
-        ("😡", "Angry"),
-    ]
-    
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="reactions")
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    emoji = models.CharField(max_length=10, choices=EMOJI_CHOICES)
+    emoji = models.CharField(max_length=20)
     reacted_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:

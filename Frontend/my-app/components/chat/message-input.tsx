@@ -1,10 +1,11 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useMessages } from '@/hooks/useMessage';
 import { useChat } from '@/hooks/useChat';
-import { Smile, Paperclip, Mic, Send, X, Trash2 } from 'lucide-react';
+import { Smile, Paperclip, Mic, Send, X, Trash2, Search } from 'lucide-react';
 
 interface MessageInputProps {
   value: string;
@@ -15,12 +16,63 @@ interface MessageInputProps {
   chatId?: number;
 }
 
+const emojiCategories = [
+  {
+    name: 'Popular',
+    emojis: ['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '👏', '🙏', '😊', '😄', '😁', '😎', '🥳', '😜', '🤔', '😴', '😇', '💡', '💪', '🙌', '🎂', '🍕', '☕', '🌈', '🚀', '🎵', '💯'],
+  },
+  {
+    name: 'Smileys',
+    emojis: ['😀', '😃', '😄', '😁', '😅', '🤣', '🙂', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🥺'],
+  },
+  {
+    name: 'Animals',
+    emojis: ['🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🐔', '🐧', '🦄', '🐲', '🐉', '🦋', '🐾', '🦌', '🦘', '🦔'],
+  },
+  {
+    name: 'Food',
+    emojis: ['🍕', '🍔', '🌮', '🍟', '🍦', '🍩', '🍰', '☕', '🍵', '🥤', '🍉', '🍓', '🍇', '🍎', '🍌', '🥝', '🥑', '🥐', '🍣', '🍜', '🍔', '🍞', '🧁'],
+  },
+  {
+    name: 'Objects',
+    emojis: ['🎁', '🎂', '🎈', '🎉', '🎵', '📱', '💻', '🎧', '🚀', '🌈', '💡', '⚽', '🏀', '🎯', '🧠', '🎮', '🏆', '🔔', '🔥', '💯', '📚', '💼', '🧰', '🪄'],
+  },
+  {
+    name: 'Party',
+    emojis: ['🎉', '🎊', '🎈', '🎂', '🎁', '🥳', '🎆', '🎇', '✨', '🎯', '🏆', '🎭'],
+  },
+  {
+    name: 'Travel',
+    emojis: ['🚗', '✈️', '🚀', '🚆', '🚄', '🛫', '🛬', '⛴️', '🚢', '🏖️', '🏕️', '🏔️', '🌋', '🏜️'],
+  },
+];
+
 export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, chatId }: MessageInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [selectedEmojiCategory, setSelectedEmojiCategory] = useState('Popular');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [recentEmojis, setRecentEmojis] = useState<string[]>(['👍', '❤️', '😂', '🎉', '🔥', '😄', '🥳', '🚀']);
   const [audioLevels, setAudioLevels] = useState<number[]>([30, 50, 80, 40, 70, 90, 60, 40, 75, 55, 85, 45, 65, 95, 50, 30]);
+
+  const visibleEmojiCategories = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    if (!query) {
+      return emojiCategories;
+    }
+
+    return emojiCategories
+      .map((category) => ({
+        ...category,
+        emojis: category.emojis.filter((emoji) => emoji.toLowerCase().includes(query) || category.name.toLowerCase().includes(query)),
+      }))
+      .filter((category) => category.emojis.length > 0);
+  }, [searchQuery]);
+
+  const activeEmojiCategory = visibleEmojiCategories.find((category) => category.name === selectedEmojiCategory) ?? visibleEmojiCategories[0] ?? emojiCategories[0];
 
   const { uploadMedia, replyToMessage, setReplyTo, sendMessage } = useMessages(chatId);
   const { startTyping, stopTyping } = useChat(chatId);
@@ -48,14 +100,13 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
     }
   };
 
-  const commonEmojis = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '👏', '🙏', '😊'];
-
   const insertEmoji = useCallback((emoji: string) => {
     const textarea = textareaRef.current;
     const cursorStart = textarea?.selectionStart ?? value.length;
     const cursorEnd = textarea?.selectionEnd ?? value.length;
     const nextValue = `${value.slice(0, cursorStart)}${emoji}${value.slice(cursorEnd)}`;
 
+    setRecentEmojis((prev) => [emoji, ...prev.filter((item) => item !== emoji)].slice(0, 8));
     onChange(nextValue);
     setShowEmojiPicker(false);
 
@@ -231,23 +282,86 @@ export function MessageInput({ value, onChange, onSend, onKeyPress, disabled, ch
               <Smile className="h-5 w-5" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-[280px] rounded-2xl border border-border/60 bg-popover/95 p-3 shadow-xl backdrop-blur-md" align="start" side="top" sideOffset={12}>
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-medium text-muted-foreground">Insert emoji</p>
+          <PopoverContent className="w-[360px] rounded-3xl border border-border/60 bg-popover/95 p-3 shadow-[0_22px_50px_-20px_rgba(15,23,42,0.5)] backdrop-blur-md" align="start" side="top" sideOffset={12}>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.18em]">Insert emoji</p>
               <span className="text-[11px] text-muted-foreground">Tap to add</span>
             </div>
-            <div className="grid grid-cols-5 gap-1.5">
-              {commonEmojis.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  onClick={() => insertEmoji(emoji)}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-2xl transition-all duration-150 hover:scale-105 hover:bg-accent"
+
+            <div className="mb-3 flex items-center gap-2 rounded-xl border border-border/60 bg-background/70 px-2.5 py-2">
+              <Search className="h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search emoji..."
+                className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+
+            <div className="mb-3 rounded-xl border border-border/60 bg-muted/40 p-2">
+              <div className="mb-1.5 flex items-center justify-between">
+                <p className="text-[11px] font-medium text-muted-foreground">Recent</p>
+                <span className="text-[10px] text-muted-foreground">Quick pick</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {recentEmojis.map((emoji) => (
+                  <button
+                    key={`recent-${emoji}`}
+                    type="button"
+                    onClick={() => insertEmoji(emoji)}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-xl transition-all duration-150 hover:-translate-y-0.5 hover:scale-110 hover:bg-accent/80 active:scale-95"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-3 flex flex-wrap gap-1">
+              {visibleEmojiCategories.map((category) => (
+                <Button
+                  key={category.name}
+                  variant={selectedEmojiCategory === category.name ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => setSelectedEmojiCategory(category.name)}
                 >
-                  {emoji}
-                </button>
+                  {category.name}
+                </Button>
               ))}
             </div>
+            <ScrollArea className="h-[240px]">
+              {activeEmojiCategory.emojis.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/60 p-4 text-center text-sm text-muted-foreground">
+                  <p>No emoji found for “{searchQuery}”.</p>
+                  <div className="flex flex-wrap justify-center gap-1.5">
+                    {['smile', 'love', 'party', 'food', 'travel'].map((term) => (
+                      <button
+                        key={term}
+                        type="button"
+                        onClick={() => setSearchQuery(term)}
+                        className="rounded-full bg-accent/70 px-2.5 py-1 text-[11px] text-accent-foreground transition-all duration-150 hover:scale-105"
+                      >
+                        {term}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-6 gap-1.5">
+                  {activeEmojiCategory.emojis.map((emoji, index) => (
+                    <button
+                      key={`${activeEmojiCategory.name}-${emoji}-${index}`}
+                      type="button"
+                      onClick={() => insertEmoji(emoji)}
+                      className="flex h-10 w-10 items-center justify-center rounded-xl text-2xl transition-all duration-150 hover:-translate-y-0.5 hover:scale-110 hover:bg-accent/80 active:scale-95"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
           </PopoverContent>
         </Popover>
         

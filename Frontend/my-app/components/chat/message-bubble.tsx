@@ -28,7 +28,7 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message, chatType, chatId, isSelected }: MessageBubbleProps) {
   const { user } = useAuth();
-  const { setReplyTo, canEditMessage, canDeleteMessage, editMessage, deleteMessage, forwardMessage, addReaction } = useMessages(chatId);
+  const { setReplyTo, canEditMessage, canDeleteMessage, editMessage, deleteMessage, forwardMessage, addReaction, removeReaction } = useMessages(chatId);
 
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -38,7 +38,13 @@ export function MessageBubble({ message, chatType, chatId, isSelected }: Message
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const chats = useChatStore(state => state.chats);
 
-  const commonEmojis = ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '🔥', '👏', '🙏'];
+  const commonEmojis = [
+    '👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '🔥', '👏', '🙏',
+    '😊', '😄', '😁', '😎', '🥳', '😜', '🤔', '😴', '😇', '💡',
+    '💪', '🙌', '🎂', '🍕', '☕', '🌹', '🌈', '🚀', '🎵', '💯'
+  ];
+
+  const currentUserReaction = message.reactions?.find((reaction) => reaction.user === user?.id) ?? null;
   
   const isOwnMessage = message.sender_info?.id === user?.id || message.sender === user?.id;
   const isDeleted = message.is_deleted;
@@ -117,13 +123,17 @@ export function MessageBubble({ message, chatType, chatId, isSelected }: Message
     document.body.removeChild(link);
   };
 
-  const handleAddReaction = async (emoji: string) => {
-    console.log('Adding reaction:', emoji, 'to message:', message.id);
+  const handleToggleReaction = async (emoji: string) => {
+    console.log('Toggling reaction:', emoji, 'on message:', message.id, 'currentUserReaction:', currentUserReaction?.emoji);
     try {
-      await addReaction(emoji, message.id);
+      if (currentUserReaction?.emoji === emoji) {
+        await removeReaction(emoji, message.id);
+      } else {
+        await addReaction(emoji, message.id);
+      }
       setShowEmojiPicker(false);
     } catch (error) {
-      console.error('Failed to add reaction:', error);
+      console.error('Failed to toggle reaction:', error);
     }
   };
 
@@ -138,8 +148,8 @@ export function MessageBubble({ message, chatType, chatId, isSelected }: Message
     }
   };
 
-  const getThumbnailUrl = (media: Pick<MessageMedia, 'thumbnail_url' | 'thumbnail'>) => {
-    const rawUrl = media.thumbnail_url || media.thumbnail || '';
+  const getThumbnailUrl = (media: MessageMedia) => {
+    const rawUrl = media.thumbnail || '';
     return getMediaUrl(rawUrl);
   };
 
@@ -300,11 +310,14 @@ export function MessageBubble({ message, chatType, chatId, isSelected }: Message
                     key={reaction.id}
                     variant="secondary"
                     className={cn(
-                      "text-xs px-2 py-0.5 rounded-full border",
-                      isOwnMessage
-                        ? "border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground"
-                        : "border-border/70 bg-background/80 text-foreground"
+                      "text-xs px-2 py-0.5 rounded-full border cursor-pointer transition-all duration-150 hover:scale-105",
+                      reaction.user === user?.id
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : isOwnMessage
+                          ? "border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground"
+                          : "border-border/70 bg-background/80 text-foreground"
                     )}
+                    onClick={() => handleToggleReaction(reaction.emoji)}
                   >
                     <span className="mr-1">{reaction.emoji}</span>
                   </Badge>
@@ -351,7 +364,7 @@ export function MessageBubble({ message, chatType, chatId, isSelected }: Message
                       <button
                         key={emoji}
                         type="button"
-                        onClick={() => handleAddReaction(emoji)}
+                        onClick={() => handleToggleReaction(emoji)}
                         className="flex h-10 w-10 items-center justify-center rounded-xl text-2xl transition-all duration-150 hover:scale-105 hover:bg-accent"
                       >
                         {emoji}

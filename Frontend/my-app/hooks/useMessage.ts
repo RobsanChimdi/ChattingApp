@@ -145,7 +145,7 @@ export const useMessages = (chatId?: number): UseMessagesReturn => {
     if (!targetMessageId || !chatId || !user) return;
     try {
       await messageService.removeReaction(targetMessageId, emoji);
-      removeReactionAction(chatId, targetMessageId, user.id);
+      removeReactionAction(chatId, targetMessageId, user.id, emoji);
       setSelectedMessage(null);
     } catch (err: unknown) {
       setLocalError(err instanceof Error ? err.message : 'Failed to remove reaction');
