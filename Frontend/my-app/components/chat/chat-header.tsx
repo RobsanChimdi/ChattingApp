@@ -80,18 +80,22 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
   };
 
   const handleAudioCall = async () => {
+    console.log('Audio call button clicked for chat:', chat.id);
     try {
-      await initiateCall(chat.id, 'audio');
+      const call = await initiateCall(chat.id, 'audio');
+      console.log('Audio call initiated successfully:', call);
     } catch (error) {
-      console.error('Failed to initiate call:', error);
+      console.error('Failed to initiate audio call:', error);
     }
   };
 
   const handleVideoCall = async () => {
+    console.log('Video call button clicked for chat:', chat.id);
     try {
-      await initiateCall(chat.id, 'video');
+      const call = await initiateCall(chat.id, 'video');
+      console.log('Video call initiated successfully:', call);
     } catch (error) {
-      console.error('Failed to initiate call:', error);
+      console.error('Failed to initiate video call:', error);
     }
   };
 
@@ -107,34 +111,39 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
 
   return (
     <>
-      <div className="border-b">
-        <div className="flex items-center justify-between p-4">
+      <div className="border-b border-border/70 bg-gradient-to-r from-background via-background to-muted/35 backdrop-blur-sm">
+        <div className="flex items-center justify-between gap-4 p-4">
           {/* Left section */}
-          <div className="flex items-center space-x-4">
+          <div className="flex min-w-0 items-center gap-4">
             {onBack && (
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={onBack}
-                className="md:hidden"
+                className="h-9 w-9 rounded-full md:hidden"
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
             )}
-            
-            <div className="flex items-center space-x-3">
-              <Avatar className="h-10 w-10">
-                <AvatarImage src={getChatAvatar()} />
-                <AvatarFallback>
-                  {getChatName().charAt(0).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              
-              <div>
-                <div className="flex items-center space-x-2">
-                  <h2 className="font-semibold">{getChatName()}</h2>
+
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="relative">
+                <Avatar className="h-11 w-11 border-2 border-background shadow-sm ring-2 ring-border/60">
+                  <AvatarImage src={getChatAvatar()} />
+                  <AvatarFallback>
+                    {getChatName().charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                {chat.chat_type === 'private' && participants.find((p) => p.id !== user?.id)?.is_online && (
+                  <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-background bg-emerald-500" />
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="truncate text-base font-semibold text-foreground">{getChatName()}</h2>
                   {chat.chat_type === 'group' && (
-                    <Badge variant="secondary" className="h-5">
+                    <Badge variant="secondary" className="h-5 rounded-full px-2 text-[11px]">
                       <Users className="h-3 w-3 mr-1" />
                       Group
                     </Badge>
@@ -148,18 +157,20 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
           </div>
 
           {/* Right section */}
-          <div className="flex items-center space-x-1">
+          <div className="flex shrink-0 items-center gap-1.5">
             {isSearching ? (
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2 rounded-full border border-border/70 bg-background/90 px-2 shadow-sm">
+                <Search className="h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Search in chat..."
-                  className="h-9 w-48"
+                  className="h-9 w-48 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
                   autoFocus
                 />
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => setIsSearching(false)}
+                  className="h-8 w-8 rounded-full"
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -170,36 +181,39 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
                   variant="ghost"
                   size="icon"
                   onClick={() => setIsSearching(true)}
+                  className="h-9 w-9 rounded-full hover:bg-accent/80"
                 >
-                  <Search className="h-5 w-5" />
+                  <Search className="h-4 w-4" />
                 </Button>
-                
+
                 {chat.chat_type !== 'private' && (
-                  <Button variant="ghost" size="icon">
-                    <UserPlus className="h-5 w-5" />
+                  <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-accent/80">
+                    <UserPlus className="h-4 w-4" />
                   </Button>
                 )}
-                
+
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={handleAudioCall}
+                  className="h-9 w-9 rounded-full hover:bg-accent/80"
                 >
-                  <Phone className="h-5 w-5" />
+                  <Phone className="h-4 w-4" />
                 </Button>
-                
+
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={handleVideoCall}
+                  className="h-9 w-9 rounded-full hover:bg-accent/80"
                 >
-                  <Video className="h-5 w-5" />
+                  <Video className="h-4 w-4" />
                 </Button>
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon">
-                      <MoreVertical className="h-5 w-5" />
+                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-accent/80">
+                      <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
@@ -215,7 +229,7 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
                       <ImageIcon className="h-4 w-4 mr-2" />
                       Media, Files & Links
                     </DropdownMenuItem>
-                    
+
                     {chat.chat_type === 'group' && (
                       <>
                         <DropdownMenuSeparator />
@@ -225,7 +239,7 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
                         </DropdownMenuItem>
                       </>
                     )}
-                    
+
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       className="text-destructive"

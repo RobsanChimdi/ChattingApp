@@ -74,6 +74,7 @@ export const useChat = (chatId?: number): UseChatReturn => {
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hasFetchedChatsRef = useRef(false);
 
   const messages = activeChatId ? storeMessages.get(activeChatId) || [] : [];
   const unreadCount = activeChatId ? unreadCounts.get(activeChatId) || 0 : 0;
@@ -82,8 +83,15 @@ export const useChat = (chatId?: number): UseChatReturn => {
     : new Set<number>();
 
   useEffect(() => {
-    if (user && chats.length === 0) {
-      fetchChatsAction().catch(console.error);
+    if (user && !hasFetchedChatsRef.current && chats.length === 0) {
+      hasFetchedChatsRef.current = true;
+      const startTime = performance.now();
+      fetchChatsAction()
+        .then(() => {
+          const elapsed = performance.now() - startTime;
+          console.log(`DEBUG: fetchChats took ${elapsed.toFixed(2)}ms`);
+        })
+        .catch(console.error);
     }
   }, [user]);
 
@@ -91,13 +99,14 @@ export const useChat = (chatId?: number): UseChatReturn => {
     if (activeChatId) {
       const chat = chats.find(c => c.id === activeChatId);
       setCurrentChatAction(chat || null);
-      if (chat && !storeMessages.get(activeChatId)) {
+      // Only fetch messages if chat is found and we have chats loaded
+      if (chat && chats.length > 0) {
         fetchMessagesAction(activeChatId).catch(console.error);
       }
     } else {
       setCurrentChatAction(null);
     }
-  }, [activeChatId]);
+  }, [activeChatId, chats]);
 
   useEffect(() => {
     if (!activeChatId) return;

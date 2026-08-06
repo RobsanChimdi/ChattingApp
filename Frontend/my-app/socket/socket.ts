@@ -33,10 +33,34 @@ class SocketService {
   // ========== PUBLIC API ==========
 
   async connect(): Promise<void> {
-    // WebSocket server is not available, skip connection
-    console.log('WebSocket server not available, skipping connection');
-    this.isManuallyDisconnected = true;
-    return;
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+
+    if (this._isConnected) {
+      return;
+    }
+
+    if (this.isConnecting) {
+      return new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (!this.isConnecting) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+      });
+    }
+
+    this.isConnecting = true;
+    this.connectionPromise = this._connect();
+    
+    try {
+      await this.connectionPromise;
+    } finally {
+      this.isConnecting = false;
+      this.connectionPromise = null;
+    }
   }
 
   disconnect(): void {
@@ -158,16 +182,14 @@ class SocketService {
         this.socket.disconnect();
       }
 
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 
-                   process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws') || 
-                   'ws://localhost:8000';
+      const wsUrl = 'http://localhost:8001';
 
-      console.log(`Connecting to WebSocket at: ${wsUrl}/ws/`);
+      console.log(`Connecting to Socket.IO at: ${wsUrl}`);
 
-      this.socket = io(`${wsUrl}/ws/`, {
+      this.socket = io(wsUrl, {
         auth: { token: wsAuthToken },
         transports: ['websocket', 'polling'],
-        reconnection: false,
+        reconnection: true,
         timeout: 10000,
         forceNew: true,
         withCredentials: true,

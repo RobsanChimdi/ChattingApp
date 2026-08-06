@@ -122,6 +122,7 @@ class ApiClient {
         headers: {
           'Content-Type': undefined, // Remove the default application/json
         },
+        timeout: 120000, // 2 minutes timeout for file uploads
         onUploadProgress: (progressEvent) => {
           if (onProgress && progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);

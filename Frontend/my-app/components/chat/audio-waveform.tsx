@@ -321,16 +321,22 @@ export function AudioWaveform({ media, messageType, isOwnMessage }: AudioWavefor
             </span>
           )}
           {audioUrl && (
-            <a
-              href={audioUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              download
+            <button
+              onClick={() => {
+                console.log('Audio download clicked');
+                const link = document.createElement('a');
+                link.href = audioUrl;
+                link.download = media?.file_name || 'audio';
+                link.target = '_blank';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }}
               className="hover:opacity-100 transition-opacity p-0.5"
               title="Download Audio"
             >
               <Download className="h-3.5 w-3.5" />
-            </a>
+            </button>
           )}
         </div>
       </div>

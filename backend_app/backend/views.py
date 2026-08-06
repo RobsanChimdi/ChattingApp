@@ -897,20 +897,23 @@ class ChatMessagesView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = MessageSerializer
     pagination_class = StandardPagination
-    
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-    
+
     def get_queryset(self):
+        import time
+        start_time = time.time()
+
         chat_id = self.kwargs.get('chat_id')
         chat = get_object_or_404(Chat, id=chat_id, is_active=True)
-        
+
         # Check if user is a participant
         if not chat.participants.filter(id=self.request.user.id).exists():
             raise PermissionDenied("Not a participant in this chat")
-        
+
         # Mark messages as read (in bulk for efficiency)
         before = timezone.now()
         updated = MessageStatus.objects.filter(
@@ -921,12 +924,12 @@ class ChatMessagesView(generics.ListAPIView):
             status='read',
             read_at=before
         )
-        
+
         if updated > 0:
             logger.debug(f"Marked {updated} messages as read for user {self.request.user.id} in chat {chat_id}")
-        
+
         # Get messages with optimized queries
-        return Message.objects.filter(
+        queryset = Message.objects.filter(
             chat=chat,
             is_deleted=False
         ).select_related(
@@ -940,6 +943,11 @@ class ChatMessagesView(generics.ListAPIView):
                 'id', 'message', 'user', 'status', 'delivered_at', 'read_at'
             ))
         ).order_by('-created_at')
+
+        elapsed = time.time() - start_time
+        print(f"DEBUG: ChatMessagesView.get_queryset took {elapsed:.3f}s for chat {chat_id}")
+
+        return queryset
 
 
 class UnreadMessageCountView(APIView):
@@ -1500,7 +1508,7 @@ class ChatMediaView(generics.ListAPIView):
 class CallListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = CallSerializer
-    
+
     def get_queryset(self):
         return Call.objects.filter(
             chat__participants=self.request.user
@@ -1509,14 +1517,24 @@ class CallListCreateView(generics.ListCreateAPIView):
         ).prefetch_related(
             Prefetch('participants', queryset=CallParticipant.objects.select_related('user'))
         ).order_by('-started_at')
-    
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-    
+
     def perform_create(self, serializer):
-        serializer.save(initiated_by=self.request.user)
+        call = serializer.save(initiated_by=self.request.user)
+        # Emit socket event for call initiation via HTTP to Socket.IO server
+        try:
+            import requests
+            requests.post('http://localhost:8001/call_initiated', json={
+                'call_id': call.id,
+                'chat_id': call.chat.id,
+                'initiated_by': self.request.user.id
+            }, timeout=1)
+        except Exception as e:
+            print(f"Failed to emit call_initiated event: {e}")
 
 
 class CallDetailView(generics.RetrieveUpdateAPIView):
@@ -1542,16 +1560,18 @@ class JoinCallView(APIView):
     def post(self, request, call_id):
         try:
             call = Call.objects.get(id=call_id)
+            print(f"DEBUG: Join call {call_id}, current status: {call.status}")
         except Call.DoesNotExist:
-            return Response({"error": "Call not found"}, 
+            return Response({"error": "Call not found"},
                           status=status.HTTP_404_NOT_FOUND)
-        
+
         # Check if user is a participant in the chat
         if not call.chat.participants.filter(id=request.user.id).exists():
             raise PermissionDenied("Not a participant in this chat")
-        
+
         if call.status not in ['initiated', 'ongoing']:
-            return Response({"error": "Call is not active"}, 
+            print(f"DEBUG: Call status check failed. Status: {call.status}, Allowed: ['initiated', 'ongoing']")
+            return Response({"error": f"Call is not active. Current status: {call.status}"},
                           status=status.HTTP_400_BAD_REQUEST)
         
         # Check if user is already a participant

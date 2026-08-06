@@ -78,54 +78,71 @@ export function ChatWindow({ chatId, onBack }: ChatWindowProps) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.12),_transparent_35%),linear-gradient(to_bottom,_rgba(255,255,255,0.02),_transparent)]">
       {currentChat ? (
         <ChatHeader chat={currentChat} onBack={onBack} />
       ) : (
-        <div className="p-4 border-b">
-          <div className="h-10 w-10 bg-muted animate-pulse rounded-full flex items-center justify-center">
-            <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />
+        <div className="border-b border-border/70 bg-background/80 p-4 backdrop-blur-sm">
+          <div className="flex h-10 w-10 animate-pulse items-center justify-center rounded-full bg-muted">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         </div>
       )}
 
-      <ScrollArea ref={scrollAreaRef} className="flex-1 p-4" onScroll={handleScroll} onScrollCapture={handleScrollToTop}>
+      <ScrollArea ref={scrollAreaRef} className="flex-1 px-4 pb-4 pt-3" onScroll={handleScroll} onScrollCapture={handleScrollToTop}>
         {isLoading && messages.length === 0 ? (
           <div className="space-y-4">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-                <div className="max-w-[70%]"><div className="h-16 bg-muted animate-pulse rounded-lg" /></div>
+                <div className="max-w-[70%]">
+                  <div className="h-16 animate-pulse rounded-[22px] bg-muted/80" />
+                </div>
               </div>
             ))}
           </div>
         ) : (
           <>
-            {hasMoreMessages && (
-              <div className="flex justify-center mb-4">
-                <Button variant="outline" size="sm" onClick={loadMoreMessages} disabled={isLoading}>
-                  {isLoading ? 'Loading...' : 'Load older messages'}
-                </Button>
+            {messages.length === 0 && !isLoading ? (
+              <div className="flex h-full min-h-[280px] items-center justify-center">
+                <div className="w-full max-w-md rounded-[28px] border border-border/70 bg-background/70 px-6 py-8 text-center shadow-sm backdrop-blur-sm">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <MessageSquare className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-lg font-semibold">Start the conversation</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">Send the first message and make this chat feel alive.</p>
+                </div>
               </div>
+            ) : (
+              <>
+                {hasMoreMessages && messages.length > 0 && (
+                  <div className="mb-4 flex justify-center">
+                    <Button variant="outline" size="sm" onClick={loadMoreMessages} disabled={isLoading} className="rounded-full border-border/70 bg-background/80 backdrop-blur-sm">
+                      {isLoading ? 'Loading...' : 'Load older messages'}
+                    </Button>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  {messages.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      chatType={currentChat?.chat_type || 'private'}
+                      chatId={chatId}
+                      isSelected={selectedMessage?.id === message.id}
+                    />
+                  ))}
+                </div>
+              </>
             )}
 
-            <div className="space-y-4">
-              {messages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  chatType={currentChat?.chat_type || 'private'}
-                  isSelected={selectedMessage?.id === message.id}
-                />
-              ))}
-            </div>
-
             {typingUsers.size > 0 && (
-              <div className="flex items-center space-x-2 mt-4">
-                <div className="bg-muted rounded-lg p-3">
+              <div className="mt-4 flex items-center space-x-2">
+                <div className="rounded-2xl border border-border/70 bg-background/80 px-3 py-2 shadow-sm backdrop-blur-sm">
                   <div className="flex space-x-1">
-                    <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" />
-                    <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                    <div className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+                    <div className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" />
+                    <div className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: '0.2s' }} />
+                    <div className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: '0.4s' }} />
                   </div>
                 </div>
               </div>
@@ -136,7 +153,7 @@ export function ChatWindow({ chatId, onBack }: ChatWindowProps) {
         <div ref={messagesEndRef} />
       </ScrollArea>
 
-      <div className="border-t p-4">
+      <div className="border-t border-border/70 bg-background/80 p-4 backdrop-blur-sm">
         <MessageInput
           value={newMessage}
           onChange={setNewMessage}

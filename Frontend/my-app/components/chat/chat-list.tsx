@@ -32,8 +32,9 @@ export function ChatList({ onChatSelect, selectedChatId }: ChatListProps) {
   const selectedChatIdNumber = selectedChatId ? Number(selectedChatId) : undefined;
 
   useEffect(() => {
-    fetchChats();
-  }, [fetchChats]);
+    // Don't fetch chats here - useChat hook already handles it
+    // This prevents duplicate API calls on page refresh
+  }, []);
 
   useEffect(() => {
     if (searchQuery) {

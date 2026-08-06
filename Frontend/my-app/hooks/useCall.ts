@@ -165,7 +165,7 @@ export const useCall = (callId?: number): UseCallReturn => {
   useEffect(() => {
     if (activeCall && callId === activeCall.id && localStream) {
       activeCall.participants?.forEach((participant) => {
-        if (participant.user.id !== user?.id) {
+        if (participant.user && participant.user.id !== user?.id) {
           webRTC.addRemoteParticipant(participant.user.id).catch(console.error);
         }
       });
