@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,6 +48,7 @@ interface ChatHeaderProps {
 }
 
 export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
+  const router = useRouter();
   const { user } = useAuth();
   const { initiateCall } = useCall();
   const { leaveChat } = useChat();
@@ -80,10 +82,29 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
   };
 
   const handleAudioCall = async () => {
+    console.log('=== ONLINE CHECK DEBUG ===');
     console.log('Audio call button clicked for chat:', chat.id);
+    console.log('Chat type:', chat.chat_type);
+    console.log('Participants:', participants);
+    console.log('Current user:', user);
+
+    // Check if other user is online for private chats
+    if (chat.chat_type === 'private') {
+      const otherUser = participants.find((p) => p.id !== user?.id);
+      console.log('Other user:', otherUser);
+      console.log('Other user online status:', otherUser?.is_online);
+      
+      if (!otherUser?.is_online) {
+        alert(`${otherUser?.username || 'User'} is offline. You cannot call offline users.`);
+        return;
+      }
+    }
+
     try {
       const call = await initiateCall(chat.id, 'audio');
       console.log('Audio call initiated successfully:', call);
+      // Navigate to call page
+      router.push(`/dashboard/call/${call.id}`);
     } catch (error) {
       console.error('Failed to initiate audio call:', error);
     }
@@ -91,9 +112,27 @@ export function ChatHeader({ chat, onBack }: ChatHeaderProps) {
 
   const handleVideoCall = async () => {
     console.log('Video call button clicked for chat:', chat.id);
+    console.log('Chat type:', chat.chat_type);
+    console.log('Participants:', participants);
+    console.log('Current user:', user);
+
+    // Check if other user is online for private chats
+    if (chat.chat_type === 'private') {
+      const otherUser = participants.find((p) => p.id !== user?.id);
+      console.log('Other user:', otherUser);
+      console.log('Other user online status:', otherUser?.is_online);
+
+      if (!otherUser?.is_online) {
+        alert(`${otherUser?.username || 'User'} is offline. You cannot call offline users.`);
+        return;
+      }
+    }
+
     try {
       const call = await initiateCall(chat.id, 'video');
       console.log('Video call initiated successfully:', call);
+      // Navigate to call page
+      router.push(`/dashboard/call/${call.id}`);
     } catch (error) {
       console.error('Failed to initiate video call:', error);
     }

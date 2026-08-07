@@ -61,7 +61,8 @@ export default function CallPage() {
   const [showParticipants, setShowParticipants] = useState(false);
   const [connectionQuality, setConnectionQuality] = useState<'good' | 'fair' | 'poor'>('good');
   const [showIncomingModal, setShowIncomingModal] = useState(false);
-  
+  const hasJoinedRef = useRef(false);
+
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Check authentication
@@ -71,12 +72,21 @@ export default function CallPage() {
     }
   }, [isAuthenticated, authLoading, router]);
 
-  // Join call automatically
+  // Join call automatically - only attempt once
   useEffect(() => {
-    if (isAuthenticated && callIdNumber && !activeCall && !isLoading && !isJoining) {
-      joinCall(callIdNumber).catch(console.error);
+    if (isAuthenticated && callIdNumber && !activeCall && !isLoading && !isJoining && !hasJoinedRef.current) {
+      console.log('Auto-joining call:', callIdNumber);
+      hasJoinedRef.current = true;
+      joinCall(callIdNumber).catch((error) => {
+        // If call is not active (completed, rejected, etc.), redirect back to chat immediately without logging error
+        if (error.message?.includes('not active') || error.message?.includes('completed')) {
+          router.push('/dashboard/chat');
+        } else {
+          console.error('Failed to join call:', error);
+        }
+      });
     }
-  }, [isAuthenticated, callIdNumber, activeCall, isLoading, isJoining, joinCall]);
+  }, [isAuthenticated, callIdNumber, activeCall, isLoading, isJoining, joinCall, router]);
 
   // Start call duration timer
   useEffect(() => {

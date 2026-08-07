@@ -36,6 +36,16 @@ async def connect(sid, environ, auth):
         connected_users[sid] = user_id
         await sio.enter_room(sid, f"user_{user_id}")
         print(f"User {user_id} joined room with sid {sid}")
+        # Update user's online status
+        from asgiref.sync import sync_to_async
+        try:
+            async def update_online_status():
+                user = await sync_to_async(User.objects.get)(id=user_id)
+                user.update_last_seen()
+            await update_online_status()
+            print(f"User {user_id} marked as online")
+        except User.DoesNotExist:
+            print(f"User {user_id} not found")
 
 @sio.event
 async def disconnect(sid):
@@ -46,6 +56,16 @@ async def disconnect(sid):
         del connected_users[sid]
         # Leave user room
         await sio.leave_room(sid, f"user_{user_id}")
+        # Mark user as offline
+        from asgiref.sync import sync_to_async
+        try:
+            async def set_offline_status():
+                user = await sync_to_async(User.objects.get)(id=user_id)
+                user.set_offline()
+            await set_offline_status()
+            print(f"User {user_id} marked as offline")
+        except User.DoesNotExist:
+            print(f"User {user_id} not found")
 
 @sio.event
 async def join_user_room(sid, data):

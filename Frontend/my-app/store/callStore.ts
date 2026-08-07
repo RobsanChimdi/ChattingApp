@@ -166,9 +166,9 @@ export const useCallStore = create<CallStore>()(
       addParticipant: (callId, participant) => {
         set((state) => {
           const callParticipants = state.participants.get(callId) || [];
-          const exists = callParticipants.some((p) => p.user.id === participant.user.id);
+          const exists = participant.user && callParticipants.some((p) => p.user?.id === participant.user.id);
           if (exists) return state;
-          
+
           return {
             participants: new Map(state.participants).set(callId, [...callParticipants, participant]),
           };
@@ -179,11 +179,11 @@ export const useCallStore = create<CallStore>()(
         set((state) => {
           const callParticipants = state.participants.get(callId);
           if (!callParticipants) return state;
-          
+
           return {
             participants: new Map(state.participants).set(
               callId,
-              callParticipants.filter((p) => p.user.id !== userId)
+              callParticipants.filter((p) => p.user?.id !== userId)
             ),
           };
         });
