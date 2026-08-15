@@ -50,6 +50,12 @@ class MediaService {
   private async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.mediaDevices) {
+      this.isInitialized = true;
+      return;
+    }
+
     try {
       // Don't request audio permissions during initialization
       // Only request when actually needed (e.g., when recording)
@@ -61,6 +67,7 @@ class MediaService {
       this.isInitialized = true;
     } catch (error) {
       console.error('Error initializing media service:', error);
+      this.isInitialized = true; // Mark as initialized even on error to prevent retries
     }
   }
 
